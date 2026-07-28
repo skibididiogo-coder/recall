@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recall</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,100;9..40,200;9..40,300;9..40,400;9..40,500;9..40,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- pdf.js (Mozilla) — reads text out of PDFs, entirely in the browser. Loaded from a CDN;
+     fine because PDF import only feeds AI generation, which already needs the internet. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+
+<nav class="app-nav">
+  <div class="nav-inner">
+    <button class="nav-logo" onclick="goHome()" aria-label="Recall home">
+      <span class="nav-logo-mark">R</span>
+      <span class="nav-logo-name">Recall</span>
+    </button>
+    <div class="nav-tabs">
+      <button class="nav-tab" id="tab-home" onclick="goHome()">Home</button>
+      <button class="nav-tab" id="tab-decks" onclick="goDecks()">Decks</button>
+      <button class="nav-tab" id="tab-generate" onclick="goGenerate()">Generate</button>
+      <button class="nav-tab" id="tab-stats" onclick="goStats()">Progress</button>
+    </div>
+    <div class="nav-right">
+      <span class="nav-crumb" id="nav-crumb"></span>
+      <button class="icon-btn" title="API key settings" onclick="openKeyModal()" aria-label="Settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <!-- ============ DECKS HOME ============ -->
+  <!-- ============ HOME (dashboard) ============
+       Split from the decks library 2026-07-27: one screen was carrying eleven
+       things. Home answers "what do I study now?"; Decks answers "what do I have?" -->
+  <section id="screen-home" class="screen active">
+    <div class="dash-header">
+      <div>
+        <div class="dash-date" id="dash-date">—</div>
+        <h1 class="dash-h1" id="dash-greeting">Recall</h1>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-outline" onclick="goGenerate()">✦ Generate with AI</button>
+        <button class="btn btn-primary" onclick="goDecks()">Your decks</button>
+      </div>
+    </div>
+
+    <!-- Backup nudge / unreadable-data warning (feature #19). Urgent, so it stays
+         on the front page. Renders nothing when there is nothing to say. -->
+    <div class="backup-nudge" id="backup-nudge" style="display:none"></div>
+
+    <!-- Hidden entirely when there are no decks: a dashboard of zeroes is worse
+         than a welcome. -->
+    <div class="dashA-top" id="dash-panels" style="display:none">
+      <div class="due-panel">
+        <div>
+          <div class="due-label">Due today</div>
+          <div class="due-num">
+            <span class="due-big" id="due-big">0</span>
+            <span class="due-unit">cards</span>
+          </div>
+          <p class="due-sub" id="due-sub"></p>
+        </div>
+        <div class="due-actions">
+          <button class="btn btn-dark" id="dash-review-btn" onclick="startDueReview()">Start review</button>
+          <button class="btn btn-outline" onclick="goDecks()">Browse decks</button>
+        </div>
+      </div>
+      <div class="stats-panel">
+        <div class="stats-panel-label">This week</div>
+        <div class="stats-list">
+          <div class="stat-row"><span class="stat-n" id="dash-streak">0</span><span class="stat-l">Day streak</span></div>
+          <div class="stat-divider"></div>
+          <div class="stat-row"><span class="stat-n" id="dash-total">0</span><span class="stat-l">Total cards</span></div>
+          <div class="stat-divider"></div>
+          <div class="stat-row"><span class="stat-n" id="dash-week">0</span><span class="stat-l">Reviewed 7d</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="home-empty"></div>
+
+    <div class="activity-panel" id="dash-activity" style="display:none">
+      <div class="activity-header">
+        <h2>Study activity</h2>
+        <div class="cal-legend">
+          <span>Less</span>
+          <div class="cal-legend-swatches">
+            <span class="hm-cell hm-0"></span><span class="hm-cell hm-1"></span><span class="hm-cell hm-2"></span><span class="hm-cell hm-3"></span><span class="hm-cell hm-4"></span>
+          </div>
+          <span>More</span>
+        </div>
+      </div>
+      <div id="dash-heatmap"></div>
+    </div>
+  </section>
+
+  <!-- ============ DECKS (the library) ============ -->
+  <section id="screen-decks" class="screen">
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Your library</div>
+        <h1 class="page">Decks</h1>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-outline" id="gen-cta" onclick="goGenerate()">✦ Generate with AI</button>
+        <button class="btn btn-primary" id="new-deck-btn" onclick="openDeckModal()">+ New deck</button>
+      </div>
+    </div>
+
+    <!-- Static (outside decks-body) so re-renders never steal focus mid-word. -->
+    <div class="field" id="deck-search-wrap" style="display:none">
+      <input id="deck-search" type="search" placeholder="Search decks and cards" autocomplete="off"
+             oninput="renderDecks()"
+             onkeydown="if(event.key==='Escape'){event.preventDefault();this.value='';renderDecks();}">
+    </div>
+    <div id="decks-body"></div>
+
+    <div class="data-footer">
+      <span class="data-footer-note">Your decks and progress live only in this browser. Back them up to a file so a browser reset can't erase them.</span>
+      <div class="data-footer-actions">
+        <button class="btn btn-outline btn-sm" onclick="exportData()">↓ Export backup</button>
+        <button class="btn btn-outline btn-sm" onclick="importData()">↑ Import backup</button>
+      </div>
+    </div>
+    <input type="file" id="import-file" accept="application/json,.json" style="display:none" onchange="onImportFile(event)">
+  </section>
+
+  <!-- ============ DECK VIEW ============ -->
+  <section id="screen-deck" class="screen">
+    <button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="goDecks()">← All decks</button>
+    <div class="page-head">
+      <div>
+        <div class="eyebrow" id="deck-tag-line">Deck</div>
+        <h1 class="page" id="deck-title">Deck</h1>
+        <div id="deck-due-line" style="margin-top:8px;font-size:14px;color:var(--ink-2)"></div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-danger-ghost" onclick="onDeleteDeck()">Delete deck</button>
+        <button class="btn btn-outline" onclick="goGenerateForDeck()">✦ Generate cards</button>
+        <button class="btn btn-outline" id="chat-btn" onclick="goChatForDeck()">Chat</button>
+        <button class="btn btn-outline" id="artifacts-btn" onclick="goArtifactsForDeck()">Artifacts</button>
+        <button class="btn btn-outline" id="quiz-btn" onclick="startQuiz()">Quiz</button>
+        <button class="btn btn-outline" id="cram-btn" onclick="startCram()">Cram</button>
+        <button class="btn btn-primary" id="study-btn" onclick="startReview()">Study</button>
+      </div>
+    </div>
+
+    <!-- Speech settings for this deck. Language is per-deck (a property of the
+         material); "read aloud" is global (a property of your situation).
+         Audio is pre-generated Kokoro clips now, so these controls always show —
+         the old "browser has no speech engine" hiding case no longer exists. -->
+    <div class="speak-row" id="speak-toggle-row">
+      <label class="speak-check">
+        <input type="checkbox" id="speak-toggle" onchange="onToggleAutoSpeak()">
+        <span>Read cards aloud</span>
+      </label>
+      <label class="speak-lang">
+        <span>Voice</span>
+        <select id="deck-lang" onchange="onChangeDeckLang()"></select>
+      </label>
+      <button class="btn btn-ghost btn-sm speak-btn" onclick="onTestVoice()">Test voice</button>
+    </div>
+
+    <details class="deck-summary" id="deck-summary-wrap" style="display:none">
+      <summary>Summary <span class="deck-summary-hint">AI-written from your imported material</span></summary>
+      <p class="summary-text" id="deck-summary-text"></p>
+    </details>
+
+    <div class="panel">
+      <div class="field">
+        <label for="card-front">Front — the question or prompt</label>
+        <textarea id="card-front" placeholder="e.g. What is the powerhouse of the cell?"></textarea>
+      </div>
+      <div class="field">
+        <label for="card-back">Back — the answer</label>
+        <textarea id="card-back" placeholder="e.g. The mitochondria."></textarea>
+      </div>
+      <div class="form-foot">
+        <span class="form-error" id="card-error"></span>
+        <button class="btn btn-primary" onclick="onAddCard()">Add card</button>
+      </div>
+    </div>
+
+    <div class="section-label">
+      <h2>Cards</h2>
+      <span class="count" id="cards-count">0</span>
+    </div>
+    <div class="card-list" id="cards-body"></div>
+  </section>
+
+  <!-- ============ REVIEW ============ -->
+  <section id="screen-review" class="screen">
+    <div id="review-active">
+      <div class="review-wrap">
+        <div class="review-head">
+          <span class="review-deck" id="review-deck-name">Deck</span>
+          <span class="review-pos" id="review-pos">1 / 1</span>
+        </div>
+        <div class="progress"><div class="progress-fill" id="review-bar" style="width:0%"></div></div>
+        <div class="flashcard" id="flashcard" onclick="flip()" role="button" tabindex="0"
+             aria-label="Flashcard. Click or press space to reveal the answer.">
+          <button class="speak-btn card-speak" title="Read aloud (S)" aria-label="Read this card aloud"
+                  onclick="event.stopPropagation(); speakReviewFace()">🔊</button>
+          <div class="face-label" id="face-label">Question</div>
+          <div class="face-text" id="face-text">—</div>
+          <div class="flip-hint" id="flip-hint">click or press space to flip</div>
+        </div>
+        <div id="show-answer-row" class="show-answer-row">
+          <button class="btn btn-primary" onclick="flip()">Show answer</button>
+        </div>
+        <div id="rating-grid" class="rating-grid" style="display:none">
+          <button class="rating-btn rating-again" onclick="rate('again')"><span>Again</span><span class="interval" id="iv-again">—</span></button>
+          <button class="rating-btn rating-hard"  onclick="rate('hard')"><span>Hard</span><span class="interval" id="iv-hard">—</span></button>
+          <button class="rating-btn rating-good"  onclick="rate('good')"><span>Good</span><span class="interval" id="iv-good">—</span></button>
+          <button class="rating-btn rating-easy"  onclick="rate('easy')"><span>Easy</span><span class="interval" id="iv-easy">—</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- caught up (nothing due) -->
+    <div id="review-caughtup" style="display:none">
+      <div class="centered">
+        <div class="big-icon" style="background:var(--success-bg)">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A7F37" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <h1>You're all caught up</h1>
+        <p id="caughtup-text">No cards are due in this deck right now. Come back later, or study ahead.</p>
+        <div class="done-actions">
+          <button class="btn btn-primary" id="study-ahead-btn" onclick="startReview(true)">Study all cards anyway</button>
+          <button class="btn btn-outline" onclick="goDeck(currentDeckId)">Back to deck</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- session complete -->
+    <div id="review-done" style="display:none">
+      <div class="centered">
+        <div class="big-icon" style="background:var(--success-bg)">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A7F37" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <h1>Session complete</h1>
+        <p id="done-text">Nice work.</p>
+        <div class="done-stats">
+          <div class="done-stat"><div class="done-stat-n" id="cnt-again" style="color:var(--error)">0</div><div class="done-stat-l">Again</div></div>
+          <div class="done-stat"><div class="done-stat-n" id="cnt-hard" style="color:var(--warning)">0</div><div class="done-stat-l">Hard</div></div>
+          <div class="done-stat"><div class="done-stat-n" id="cnt-good">0</div><div class="done-stat-l">Good</div></div>
+          <div class="done-stat"><div class="done-stat-n" id="cnt-easy" style="color:var(--success)">0</div><div class="done-stat-l">Easy</div></div>
+        </div>
+        <div class="done-actions">
+          <button class="btn btn-primary" onclick="goDeck(currentDeckId)">Back to deck</button>
+          <button class="btn btn-outline" onclick="goDecks()">All decks</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ QUIZ ============ -->
+  <section id="screen-quiz" class="screen">
+    <div id="quiz-active">
+      <div class="quiz-wrap">
+        <div class="review-head">
+          <span class="review-deck" id="quiz-deck-name">Deck</span>
+          <span class="review-pos" id="quiz-pos">1 / 1</span>
+        </div>
+        <div class="progress"><div class="progress-fill" id="quiz-bar" style="width:0%"></div></div>
+        <div class="quiz-question">
+          <div class="quiz-q-label">Which answer is correct?</div>
+          <div class="quiz-q-text" id="quiz-q-text">—</div>
+        </div>
+        <div class="quiz-options" id="quiz-options"></div>
+        <div class="quiz-foot">
+          <span class="quiz-feedback" id="quiz-feedback"></span>
+          <button class="btn btn-primary" id="quiz-next-btn" style="display:none" onclick="nextQuiz()">Next</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- quiz results -->
+    <div id="quiz-done" style="display:none">
+      <div class="centered">
+        <div class="big-icon" style="background:var(--success-bg)">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A7F37" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <h1 id="quiz-score-title">Quiz complete</h1>
+        <p id="quiz-score-text">—</p>
+        <div class="done-actions">
+          <button class="btn btn-primary" onclick="startQuiz()">Retake quiz</button>
+          <button class="btn btn-outline" onclick="goDeck(currentDeckId)">Back to deck</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CRAM ============ -->
+  <section id="screen-cram" class="screen">
+    <div id="cram-active">
+      <div class="review-wrap">
+        <div class="review-head">
+          <span class="review-deck" id="cram-deck-name">Deck</span>
+          <span class="review-pos" id="cram-left">—</span>
+        </div>
+        <div class="progress"><div class="progress-fill" id="cram-bar" style="width:0%"></div></div>
+        <div class="flashcard" onclick="cramFlip()" role="button" tabindex="0"
+             aria-label="Flashcard. Click or press space to reveal the answer.">
+          <button class="speak-btn card-speak" title="Read aloud (S)" aria-label="Read this card aloud"
+                  onclick="event.stopPropagation(); speakCramFace()">🔊</button>
+          <div class="face-label" id="cram-face-label">Question</div>
+          <div class="face-text" id="cram-face-text">—</div>
+          <div class="flip-hint" id="cram-flip-hint">click or press space to flip</div>
+        </div>
+        <div id="cram-show-row" class="show-answer-row">
+          <button class="btn btn-primary" onclick="cramFlip()">Show answer</button>
+        </div>
+        <div id="cram-grid" class="rating-grid cram-grid" style="display:none">
+          <button class="rating-btn rating-again" onclick="onCramAnswer(false)"><span>Missed</span><span class="interval">comes back</span></button>
+          <button class="rating-btn rating-easy"  onclick="onCramAnswer(true)"><span>Got it</span><span class="interval">done</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- cram results -->
+    <div id="cram-done" style="display:none">
+      <div class="centered">
+        <div class="big-icon" style="background:var(--success-bg)">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1A7F37" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        </div>
+        <h1 id="cram-score-title">Deck crammed</h1>
+        <p id="cram-score-text">—</p>
+        <div class="done-actions">
+          <button class="btn btn-primary" onclick="cramAgain()">Cram again</button>
+          <button class="btn btn-outline" onclick="goDeck(currentDeckId)">Back to deck</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CHAT WITH MATERIAL ============ -->
+  <section id="screen-chat" class="screen">
+    <div class="chat-wrap">
+      <button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="goDeck(currentDeckId)">← Back to deck</button>
+
+      <!-- Chat header (feature #21), from 01 Design/(C) Recall-standalone.html -->
+      <div class="chat-header">
+        <div class="chat-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="chat-header-text">
+          <div class="chat-title">Chat with this material</div>
+          <div class="chat-source" id="chat-source">—</div>
+        </div>
+        <span class="sources-badge" title="Answers come only from this deck's material">● Sources only</span>
+      </div>
+
+      <div class="chat-thread" id="chat-thread"></div>
+
+      <div class="chat-input-area">
+        <div class="chat-suggestions" id="chat-suggestions"></div>
+        <div class="chat-bar">
+          <textarea id="chat-input" rows="1" placeholder="Ask about this material…"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();onSendChat();}"></textarea>
+          <button class="chat-send" id="chat-send-btn" onclick="onSendChat()" aria-label="Send">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg>
+          </button>
+        </div>
+        <p class="chat-note">Each message is one API call.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ARTIFACTS (table · sheet · map) ============ -->
+  <section id="screen-artifacts" class="screen">
+    <div class="table-wrap">
+      <button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="goDeck(currentDeckId)">← Back to deck</button>
+      <div class="eyebrow" id="artifacts-context-kind">Study artifacts</div>
+      <h1 class="page" id="artifacts-deck-name" style="margin-bottom:6px">Deck</h1>
+      <div class="art-tabs" id="art-tabs">
+        <button class="art-tab" id="art-tab-table" onclick="showArtifactTab('table')">Table</button>
+        <button class="art-tab" id="art-tab-sheet" onclick="showArtifactTab('sheet')">Sheet</button>
+        <button class="art-tab" id="art-tab-map" onclick="showArtifactTab('map')">Map</button>
+        <button class="art-tab" id="art-tab-timeline" onclick="showArtifactTab('timeline')">Timeline</button>
+        <button class="art-tab" id="art-tab-chart" onclick="showArtifactTab('chart')">Chart</button>
+      </div>
+
+      <div class="art-panel" id="art-panel-table">
+        <p class="chat-note">Built only from this deck’s material. One table per deck — regenerating replaces it.</p>
+        <div class="table-input-row">
+          <input id="table-steering" type="text" autocomplete="off"
+                 placeholder="What should it compare? Leave empty and Claude picks."
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();onGenerateTable();}">
+          <button class="btn btn-primary" id="table-gen-btn" onclick="onGenerateTable()">Generate</button>
+        </div>
+        <div class="gen-status" id="table-status"></div>
+        <div id="table-result"></div>
+      </div>
+
+      <div class="art-panel" id="art-panel-sheet">
+        <p class="chat-note">A one-page pre-exam read, built only from this deck’s material. One sheet per deck — regenerating replaces it.</p>
+        <div class="table-input-row" style="justify-content:flex-end">
+          <button class="btn btn-primary" id="sheet-gen-btn" onclick="onGenerateSheet()">Generate</button>
+        </div>
+        <div class="gen-status" id="sheet-status"></div>
+        <div id="sheet-result"></div>
+      </div>
+
+      <div class="art-panel" id="art-panel-map">
+        <p class="chat-note">The key concepts and how they connect, drawn only from this deck’s material. One map per deck — regenerating replaces it.</p>
+        <div class="table-input-row" style="justify-content:flex-end">
+          <button class="btn btn-primary" id="map-gen-btn" onclick="onGenerateMap()">Generate</button>
+        </div>
+        <div class="gen-status" id="map-status"></div>
+        <div id="map-result"></div>
+      </div>
+
+      <div class="art-panel" id="art-panel-timeline">
+        <p class="chat-note">The material’s events or steps laid out in order, drawn only from this deck’s material. One timeline per deck — regenerating replaces it.</p>
+        <div class="table-input-row" style="justify-content:flex-end">
+          <button class="btn btn-primary" id="timeline-gen-btn" onclick="onGenerateTimeline()">Generate</button>
+        </div>
+        <div class="gen-status" id="timeline-status"></div>
+        <div id="timeline-result"></div>
+      </div>
+
+      <div class="art-panel" id="art-panel-chart">
+        <p class="chat-note">One chart of the numbers worth studying, drawn only from this deck’s material. Works when there are real figures to chart — otherwise it says so. One chart per deck — regenerating replaces it.</p>
+        <div class="table-input-row">
+          <input id="chart-steering" type="text" autocomplete="off"
+                 placeholder="What should it chart? Leave empty and Claude picks."
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();onGenerateChart();}">
+          <button class="btn btn-primary" id="chart-gen-btn" onclick="onGenerateChart()">Generate</button>
+        </div>
+        <div class="gen-status" id="chart-status"></div>
+        <div id="chart-result"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GENERATE ============ -->
+  <section id="screen-generate" class="screen">
+    <div class="gen-wrap">
+      <div class="eyebrow">AI flashcard generation</div>
+      <h1 class="page" style="margin-bottom:6px">Turn notes into cards</h1>
+      <p style="color:var(--ink-2);font-size:15px;margin-bottom:24px;max-width:60ch;text-wrap:pretty">Paste any text — class notes, an article, a chapter — or choose a PDF. Recall asks Claude to pull out the key ideas and write question/answer cards for you.</p>
+
+      <div class="panel">
+        <div class="field">
+          <label for="gen-deck">Add cards to</label>
+          <select id="gen-deck" onchange="onGenDeckChange()"></select>
+        </div>
+        <div class="field" id="gen-newdeck-field" style="display:none">
+          <label for="gen-newdeck-name">New deck name</label>
+          <input id="gen-newdeck-name" type="text" placeholder="e.g. Cell Biology" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="gen-source">Source text</label>
+          <div class="pdf-row">
+            <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('pdf-file').click()">📄 Choose PDF</button>
+            <input type="file" id="pdf-file" accept="application/pdf" hidden onchange="onPdfChosen(event)">
+            <span class="pdf-info" id="pdf-info"></span>
+          </div>
+          <div class="field pdf-pages-field" id="pdf-pages-field" style="display:none">
+            <label for="pdf-pages">Pages <span class="pages-hint">(optional — e.g. 3-8, blank = all)</span></label>
+            <div class="pdf-pages-row">
+              <input id="pdf-pages" type="text" placeholder="all" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();onApplyPdfPages();}">
+              <button type="button" class="btn btn-outline btn-sm" onclick="onApplyPdfPages()">Apply</button>
+            </div>
+          </div>
+          <textarea id="gen-source" style="min-height:160px" placeholder="Paste your notes, an article, or a transcript here — or choose a PDF above…"></textarea>
+        </div>
+        <div class="gen-controls">
+          <div class="gen-count-row">
+            <span class="gen-count-label">Cards to make</span>
+            <div class="count-pills" id="count-pills">
+              <button class="count-pill" onclick="setCount(this,5)">5</button>
+              <button class="count-pill active" onclick="setCount(this,10)">10</button>
+              <button class="count-pill" onclick="setCount(this,20)">20</button>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="gen-btn" onclick="onGenerate()">✦ Generate cards</button>
+        </div>
+        <div class="gen-status" id="gen-status"></div>
+      </div>
+
+      <div id="gen-results" class="gen-results" style="display:none">
+        <div class="gen-results-head">
+          <div style="display:flex;align-items:center;gap:10px">
+            <h2 id="gen-results-title">Cards generated</h2>
+            <span class="ready-badge">Review before saving</span>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn btn-outline btn-sm" onclick="discardGenerated()">Discard</button>
+            <button class="btn btn-primary btn-sm" id="gen-save-btn" onclick="saveGenerated()">Add to deck</button>
+          </div>
+        </div>
+        <div class="summary-panel" id="gen-summary" style="display:none">
+          <div class="summary-label">Summary</div>
+          <p class="summary-text" id="gen-summary-text"></p>
+        </div>
+        <div class="card-list" id="gen-cards-body"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PROGRESS / STATS ============ -->
+  <section id="screen-stats" class="screen">
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">Your progress</div>
+        <h1 class="page">Progress</h1>
+      </div>
+    </div>
+    <div id="stats-body"></div>
+  </section>
+</main>
+
+<!-- ============ NEW DECK MODAL ============ -->
+<div class="modal-backdrop" id="deck-modal" onclick="if(event.target===this)closeDeckModal()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="deck-modal-title">
+    <h2 id="deck-modal-title">New deck</h2>
+    <div class="modal-sub">A deck is a set of flashcards on one topic.</div>
+    <div class="field">
+      <label for="deck-name">Deck name</label>
+      <input id="deck-name" type="text" placeholder="e.g. Cell Biology" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="deck-tag">Subject / tag — optional</label>
+      <input id="deck-tag" type="text" placeholder="e.g. Biology" autocomplete="off">
+    </div>
+    <div class="field" id="new-deck-lang-field">
+      <label for="new-deck-lang">Read-aloud voice</label>
+      <select id="new-deck-lang"></select>
+    </div>
+    <div class="form-error" id="deck-error" style="margin-bottom:8px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeDeckModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="onCreateDeck()">Create deck</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ API KEY MODAL ============ -->
+<div class="modal-backdrop" id="key-modal" onclick="if(event.target===this)closeKeyModal()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="key-modal-title">
+    <h2 id="key-modal-title">Anthropic API key</h2>
+    <div class="modal-sub">Needed for AI card generation. Stored only in this browser, on this device — it never leaves your machine except to call Claude directly. Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</div>
+    <div class="field">
+      <label for="key-input">Key (starts with sk-ant-)</label>
+      <input id="key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="form-error" id="key-error" style="margin-bottom:8px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-danger-ghost" onclick="onClearKey()">Remove key</button>
+      <button class="btn btn-outline" onclick="closeKeyModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="onSaveKey()">Save key</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- Which Kokoro clips exist on disk, written by 04 System/(C) kokoro-build-audio.py.
+     Loaded as a <script> and not fetched on purpose: fetch() is blocked on file://
+     but <script> and <audio> are not. Missing file is fine and simply means no
+     audio has been generated yet. Must come before app.js. -->
+<script src="audio/clips.js"></script>
+
+<!-- All behavior. Must come after pdf.min.js in <head> and after the elements above. -->
+<script src="app.js"></script>
+</body>
+</html>

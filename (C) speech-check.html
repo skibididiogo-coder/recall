@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Speech check</title>
+<style>
+  body{font-family:-apple-system,system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 20px;background:#F0F0EE;color:#0A0A0A}
+  h1{font-size:22px;margin-bottom:4px}
+  .sub{color:#666;font-size:14px;margin-bottom:24px}
+  button{display:block;width:100%;padding:16px;margin:10px 0;font-size:16px;font-weight:600;
+    background:#0A0A0A;color:#fff;border:0;border-radius:8px;cursor:pointer}
+  button:active{transform:translateY(1px)}
+  #log{background:#fff;border:1px solid #DDDDD8;border-radius:8px;padding:14px;margin-top:20px;
+    font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.6;white-space:pre-wrap;min-height:120px}
+  .ok{color:#0a7a2f;font-weight:700}
+  .bad{color:#c0261a;font-weight:700}
+</style>
+</head>
+<body>
+<h1>Speech check</h1>
+<div class="sub">Nothing to do with Recall — this talks straight to the browser. Click the buttons in order and read what appears below.</div>
+
+<button onclick="sayDefault()">1 · Speak with NO language set</button>
+<button onclick="sayPT()">2 · Speak in Portuguese (pt-PT)</button>
+<button onclick="sayEN()">3 · Speak in English (en-US)</button>
+<button onclick="listVoices()">4 · List what voices exist</button>
+
+<div id="log">Ready. Turn your volume up, then click button 1.</div>
+
+<script>
+const logEl = document.getElementById('log');
+function log(msg, cls) {
+  logEl.innerHTML += (cls ? '<span class="' + cls + '">' + msg + '</span>' : msg) + '\n';
+}
+function clear() { logEl.innerHTML = ''; }
+
+// Held so the browser cannot garbage-collect it mid-sentence.
+let held = null;
+
+function trySpeak(text, lang, label) {
+  clear();
+  if (!('speechSynthesis' in window)) { log('No speechSynthesis in this browser.', 'bad'); return; }
+
+  // Do NOT cancel unconditionally: on an engine that is already wedged, a
+  // cancel() immediately before speak() kills the new utterance on arrival —
+  // which is exactly the "onerror: canceled" we were seeing.
+  if (speechSynthesis.speaking || speechSynthesis.pending) {
+    log('engine busy (speaking=' + speechSynthesis.speaking + ') — resetting first', 'bad');
+    speechSynthesis.cancel();
+    speechSynthesis.resume();   // clears Chrome's phantom paused/speaking state
+  }
+  const u = new SpeechSynthesisUtterance(text);
+  if (lang) {
+    const v = speechSynthesis.getVoices().find(x => x.lang && x.lang.replace('_','-').toLowerCase() === lang.toLowerCase());
+    if (v) { u.voice = v; u.lang = v.lang; log('using voice: ' + v.name + ' (' + v.lang + ')'); }
+    else { u.lang = lang; log('NO voice found for ' + lang + ' — asking anyway', 'bad'); }
+  } else {
+    log('no language set — browser default voice');
+  }
+
+  u.onstart = () => log('onstart fired — audio should be playing NOW', 'ok');
+  u.onend   = () => log('onend fired — it finished', 'ok');
+  u.onerror = e => log('onerror fired: ' + e.error, 'bad');
+
+  held = u;
+  speechSynthesis.speak(u);
+  log('speak() called for ' + label + '…');
+
+  setTimeout(() => {
+    log('--- 2s later ---');
+    log('speaking: ' + speechSynthesis.speaking + ' | pending: ' + speechSynthesis.pending + ' | paused: ' + speechSynthesis.paused);
+    if (!speechSynthesis.speaking && !speechSynthesis.pending) log('queue is empty', 'ok');
+  }, 2000);
+}
+
+function sayDefault() { trySpeak('Hello. Testing one two three.', null, 'default'); }
+function sayPT() { trySpeak('Olá. Isto é um teste da voz portuguesa.', 'pt-PT', 'pt-PT'); }
+function sayEN() { trySpeak('Hello. This is an English voice test.', 'en-US', 'en-US'); }
+
+function listVoices() {
+  clear();
+  const vs = speechSynthesis.getVoices();
+  log('page origin: ' + location.protocol);
+  log('total voices: ' + vs.length);
+  const pt = vs.filter(v => v.lang && v.lang.toLowerCase().startsWith('pt'));
+  const en = vs.filter(v => v.lang && v.lang.toLowerCase().startsWith('en'));
+  log('portuguese voices: ' + pt.length, pt.length ? 'ok' : 'bad');
+  pt.slice(0, 6).forEach(v => log('   • ' + v.name + ' (' + v.lang + ')' + (v.localService ? ' [local]' : ' [network]')));
+  log('english voices: ' + en.length, en.length ? 'ok' : 'bad');
+  en.slice(0, 3).forEach(v => log('   • ' + v.name + ' (' + v.lang + ')' + (v.localService ? ' [local]' : ' [network]')));
+  const def = vs.find(v => v.default);
+  log('default voice: ' + (def ? def.name + ' (' + def.lang + ')' : 'none flagged'));
+}
+
+speechSynthesis.addEventListener('voiceschanged', () => log('(voices finished loading)'));
+</script>
+</body>
+</html>
