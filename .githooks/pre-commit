@@ -1,0 +1,37 @@
+#!/bin/sh
+# Regenerates sw.js before every commit, so BUILD_ID can never go stale.
+#
+# WHY THIS EXISTS
+# A browser decides whether to install a new service worker by byte-comparing sw.js
+# with the copy it already has. Commit a change to app.js without regenerating sw.js
+# and the file is byte-identical — the browser sees no new worker and keeps serving
+# the OLD app.js forever. The fix would be live on GitHub Pages and invisible in the
+# installed app, with nothing reporting it.
+#
+# The whole design hangs on running the build script before every push. This removes
+# the "remember to run it" step, because remembering is exactly what fails.
+#
+# Lives in .githooks/ (tracked by git) rather than .git/hooks/ (never tracked), wired
+# up with:  git config core.hooksPath .githooks
+
+set -e
+
+BUILDER="../../04 System/(C) build-sw.mjs"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "✗ pre-commit: node is not on PATH — cannot regenerate sw.js." >&2
+  echo "  Committing now would ship a stale service worker. Aborting." >&2
+  exit 1
+fi
+
+if [ ! -f "$BUILDER" ]; then
+  echo "✗ pre-commit: cannot find the build script at:" >&2
+  echo "    $BUILDER" >&2
+  echo "  It lives in the vault, not in this repo, so this hook only works when the" >&2
+  echo "  repo sits at '03 Projects/Recall/02 Development/(C) recall-app'." >&2
+  echo "  Failing loudly rather than committing a stale sw.js." >&2
+  exit 1
+fi
+
+node "$BUILDER"
+git add sw.js

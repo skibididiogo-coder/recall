@@ -4,9 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Recall</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,100;9..40,200;9..40,300;9..40,400;9..40,500;9..40,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- PWA (feature #26). Installing does NOT change the origin, so the installed app
+     shares one localStorage with this tab rather than opening a second, empty library. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#F0F0EE">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
+<!-- Fonts are vendored into fonts/ (feature #26): Google Fonts cannot be relied on with
+     the wifi off, and this also drops a render-blocking cross-origin request. The
+     @font-face rules live at the top of styles.css. -->
 <!-- pdf.js (Mozilla) — reads text out of PDFs, entirely in the browser. Loaded from a CDN;
      fine because PDF import only feeds AI generation, which already needs the internet. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -575,6 +580,7 @@
       <div class="field-hint">Your decks are copied here so they survive clearing your browser. Leave empty to turn this off — everything else works the same. Runs on this Mac, so it does not reach your phone.</div>
     </div>
     <div class="form-error" id="server-error" style="margin-bottom:8px"></div>
+    <div class="field-hint" id="build-id-line" style="margin-bottom:8px"></div>
     <div class="modal-actions">
       <button class="btn btn-danger-ghost" onclick="onClearKey()">Remove key</button>
       <button class="btn btn-outline" onclick="closeKeyModal()">Cancel</button>

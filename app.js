@@ -1653,6 +1653,11 @@ function openKeyModal() {
   document.getElementById('key-error').textContent = '';
   document.getElementById('server-input').value = localStorage.getItem(SERVER_URL_KEY) || '';
   document.getElementById('server-error').textContent = '';
+  // Which code am I actually running? A waiting service worker cannot activate while
+  // any tab is still open, so "I pushed the fix" and "I am running the fix" are not
+  // the same statement. This makes the difference visible instead of silent.
+  document.getElementById('build-id-line').textContent =
+    currentBuildId ? 'Version ' + currentBuildId : 'Version — not installed (running from the network)';
   document.getElementById('key-modal').classList.add('open');
   setTimeout(() => document.getElementById('key-input').focus(), 50);
 }
@@ -5172,4 +5177,76 @@ document.getElementById('key-modal').addEventListener('keydown', e => {
   if (e.key === 'Escape') closeKeyModal();
 });
 
+/* ── PWA — install + offline (feature #26) ────────────────────────
+   The service worker can serve stale code indefinitely and report nothing, so the
+   app asks which build is actually running and says so when it changes. */
+
+const BUILD_ID_KEY = 'recall.lastBuildId';
+
+/* ── PURE pwa. Sliced by "04 System/(C) test-pwa.mjs" — must stay free of DOM,
+   network and localStorage. ── */
+
+/**
+ * Whether to tell Diogo the app updated, and which build id to store next.
+ *
+ * A fresh install must NOT say "Updated" — there is nothing to have updated from.
+ * And the stored id has to advance whenever the notice fires, or it fires forever.
+ */
+function updateNotice(storedId, currentId) {
+  if (!currentId)             return { show: false, text: '', store: storedId || null };
+  if (!storedId)              return { show: false, text: '', store: currentId };
+  if (storedId === currentId) return { show: false, text: '', store: currentId };
+  return { show: true, text: 'Updated to the latest version', store: currentId };
+}
+
+/* ── END PURE pwa ── */
+
+let currentBuildId = null;
+
+/** Ask the worker which build it is. Resolves null if it never answers. */
+function askBuildId(worker) {
+  return new Promise(resolve => {
+    if (!worker) return resolve(null);
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => resolve(null), 2000);
+    channel.port1.onmessage = e => {
+      clearTimeout(timer);
+      resolve((e.data && e.data.buildId) || null);
+    };
+    worker.postMessage({ type: 'build-id' }, [channel.port2]);
+  });
+}
+
+async function initServiceWorker() {
+  // Registration needs a secure origin. On the file:// backup copy it simply does not
+  // run, and everything else in the app works exactly as before.
+  if (!('serviceWorker' in navigator)) return;
+
+  try {
+    await navigator.serviceWorker.register('sw.js');
+    const reg = await navigator.serviceWorker.ready;
+
+    // reg.active is the worker actually SERVING this page. If an update is downloaded
+    // but still waiting, that is deliberately the old one — reporting the waiting
+    // build would claim an update that has not taken effect yet.
+    currentBuildId = await askBuildId(reg.active);
+    if (!currentBuildId) return;
+
+    let stored = null;
+    try { stored = localStorage.getItem(BUILD_ID_KEY); } catch (e) { /* private mode */ }
+
+    const notice = updateNotice(stored, currentBuildId);
+    try {
+      if (notice.store) localStorage.setItem(BUILD_ID_KEY, notice.store);
+    } catch (e) { /* storing the id is a nicety, never a reason to fail */ }
+
+    if (notice.show) toast(notice.text);
+  } catch (e) {
+    // Offline study still works from whatever is already cached; a failed
+    // registration must not take the app down with it.
+    console.warn('Service worker did not register:', e);
+  }
+}
+
 goHome();
+initServiceWorker();
