@@ -233,6 +233,84 @@ function syncStatus(opts) {
                             : 'Server backup: ' + days + ' day' + (days === 1 ? '' : 's') + ' ago.' };
 }
 
+/* ── Restore (feature #25) ────────────────────────────────────────
+   Restore is the most dangerous button in the app: it ends in
+   saveData(force:true), the one call that deliberately bypasses the #19 write
+   lock. Everything that DECIDES lives here, pure and tested. */
+
+/* Newest first. Backup filenames are timestamped and zero-padded on the server
+   precisely so that sorting them as text sorts them by time; this relies on that.
+   A list in the wrong order is how someone restores three-week-old data by
+   accident, so it is locked in by a test. */
+function sortBackupsNewestFirst(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter(e => e && typeof e === 'object' && typeof e.name === 'string' && e.name)
+    .slice()
+    .sort((a, b) => (a.name < b.name ? 1 : a.name > b.name ? -1 : 0));
+}
+
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+/* One row in the restore list. The filename is not a description — "3 decks · 25
+   cards" tells you whether it is worth restoring, and the filename does not. */
+function describeBackup(entry, now) {
+  const e = entry || {};
+  const when = Date.parse(e.savedAt);
+  let title;
+  if (!Number.isFinite(when)) {
+    title = 'Unknown date';
+  } else {
+    const d = new Date(when);
+    const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const sameDay = Number.isFinite(now) && new Date(now).toDateString() === d.toDateString();
+    title = sameDay ? 'Today, ' + time
+                    : d.getDate() + ' ' + d.toLocaleString('en-GB', { month: 'long' }) + ', ' + time;
+  }
+  return {
+    title,
+    detail: plural(Number(e.decks) || 0, 'deck') + ' · ' + plural(Number(e.cards) || 0, 'card')
+  };
+}
+
+/* May this backup replace the library, and what exactly is the user agreeing to?
+   The warning text is safety-critical, not cosmetic: a dialog that misreports the
+   numbers is worse than no dialog, because it buys false confidence at the exact
+   moment someone is about to lose work. */
+function restorePlan(opts) {
+  const o = opts || {};
+  const incoming = o.incoming;
+  const current = o.current || { decks: [], cards: [] };
+
+  if (!incoming || typeof incoming !== 'object' ||
+      !Array.isArray(incoming.decks) || !Array.isArray(incoming.cards)) {
+    return { ok: false, reason: 'wrong-shape' };
+  }
+  // Same refusal as parseBackupFile and the server. Restoring nothing over a real
+  // library is precisely the 2026-07-26 failure.
+  if (incoming.decks.length === 0 && incoming.cards.length === 0) {
+    return { ok: false, reason: 'empty' };
+  }
+
+  const counts = {
+    current:  { decks: (current.decks || []).length, cards: (current.cards || []).length },
+    incoming: { decks: incoming.decks.length,        cards: incoming.cards.length }
+  };
+
+  const have = counts.current.decks === 0 && counts.current.cards === 0
+    ? 'You have nothing saved here right now.'
+    : 'You have ' + plural(counts.current.decks, 'deck') + ' and ' +
+      plural(counts.current.cards, 'card') + ' right now.';
+
+  return {
+    ok: true,
+    counts,
+    warning: have + ' This backup has ' + plural(counts.incoming.decks, 'deck') + ' and ' +
+             plural(counts.incoming.cards, 'card') + '. Your current decks are copied to the ' +
+             'server first, so this can be undone.'
+  };
+}
+
 /* ── 1B-impure ───────────────────────────────────────────────────
    The write lock. Every destructive path in the app funnels through
    saveData(), so this single guard closes all of them at once. */
@@ -287,7 +365,8 @@ function renderBackupNudge() {
   }
   if (sync.show) {
     html += `<div>${escapeHtml(sync.text)}</div>`
-          + `<button class="btn btn-outline btn-sm" onclick="onBackupToServer()">Back up to server</button>`;
+          + `<button class="btn btn-outline btn-sm" onclick="onBackupToServer()">Back up to server</button>`
+          + `<button class="btn btn-outline btn-sm" onclick="openRestoreModal()">Restore</button>`;
   }
   el.innerHTML = html;
 }
@@ -442,6 +521,112 @@ function maybeAutoSync() {
 }
 
 function onBackupToServer() { syncToServer({ quiet: false }); }
+
+/* ── Restore, impure half (feature #25) ───────────────────────────
+   Three layers, because this ends in saveData(force:true) — the one call that
+   deliberately bypasses the #19 write lock. */
+
+let restorePick = '';
+
+function closeRestoreModal() { document.getElementById('restore-modal').classList.remove('open'); }
+
+async function openRestoreModal() {
+  const url = getServerUrl();
+  if (!url) { toast('No backup server set — add one in settings'); return; }
+
+  restorePick = '';
+  const list = document.getElementById('restore-list');
+  const err = document.getElementById('restore-error');
+  const confirmBtn = document.getElementById('restore-confirm');
+  confirmBtn.disabled = true;
+  err.textContent = '';
+  list.innerHTML = '<div class="restore-empty">Loading…</div>';
+  document.getElementById('restore-modal').classList.add('open');
+
+  let entries;
+  try {
+    const res = await fetch(url + '/backups');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    entries = sortBackupsNewestFirst(await res.json());
+  } catch (e) {
+    // Never a dead end (#22): say what happened, offer the way out that always works.
+    list.innerHTML = '<div class="restore-empty">Could not reach the backup server.</div>';
+    err.innerHTML = 'Is it running? '
+      + '<button class="btn btn-outline btn-sm" onclick="openRestoreModal()">Try again</button> '
+      + '<button class="btn btn-outline btn-sm" onclick="closeRestoreModal();importData()">Import a file instead</button>';
+    return;
+  }
+
+  if (entries.length === 0) {
+    list.innerHTML = '<div class="restore-empty">No backups on the server yet.</div>';
+    err.innerHTML = '<button class="btn btn-outline btn-sm" onclick="closeRestoreModal();onBackupToServer()">Back up to server</button>';
+    return;
+  }
+
+  const now = Date.now();
+  list.innerHTML = entries.map(e => {
+    const d = describeBackup(e, now);
+    return `<button type="button" class="restore-row" role="radio" aria-checked="false"
+              data-name="${escapeHtml(e.name)}" onclick="onPickBackup(this)">
+              <span class="rr-title">${escapeHtml(d.title)}</span>
+              <span class="rr-detail">${escapeHtml(d.detail)}</span>
+            </button>`;
+  }).join('');
+}
+
+function onPickBackup(el) {
+  document.querySelectorAll('#restore-list .restore-row')
+    .forEach(r => r.setAttribute('aria-checked', String(r === el)));
+  restorePick = el.getAttribute('data-name') || '';
+  document.getElementById('restore-confirm').disabled = !restorePick;
+}
+
+async function onRestoreSelected() {
+  if (!restorePick) return;
+  const url = getServerUrl();
+  const err = document.getElementById('restore-error');
+  err.textContent = '';
+
+  // LAYER 1 — back up what is here first. The server is append-only, so this costs
+  // one file and makes a mistaken restore reversible: what you are about to replace
+  // ends up one row above the row you picked. If it fails, there is no safety net,
+  // so the restore does not proceed.
+  const safe = await syncToServer({ quiet: true });
+  if (!safe) {
+    err.textContent = 'Could not back up your current decks first, so nothing was changed. '
+                    + (lastSyncError || '');
+    return;
+  }
+
+  let payload;
+  try {
+    const res = await fetch(url + '/backups/' + encodeURIComponent(restorePick));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    payload = await res.text();
+  } catch (e) {
+    err.textContent = 'Could not download that backup. Nothing was changed.';
+    return;
+  }
+
+  // LAYER 2 — the same door a file import goes through. One validation path, not two.
+  const parsed = parseBackupFile(payload);
+  if (!parsed.ok) {
+    err.textContent = parsed.reason === 'empty'
+      ? 'That backup is empty — restoring it would erase everything. Nothing was changed.'
+      : 'That backup could not be read. Nothing was changed.';
+    return;
+  }
+
+  // LAYER 3 — a confirmation that states the loss in numbers, not "are you sure?".
+  const plan = restorePlan({ incoming: parsed.data, current: loadData() });
+  if (!plan.ok) { err.textContent = 'That backup cannot be restored. Nothing was changed.'; return; }
+  if (!confirm('Replace everything with this backup?\n\n' + plan.warning)) return;
+
+  saveData(parsed.data, { force: true });
+  closeRestoreModal();
+  toast('Restored ' + plan.counts.incoming.decks + ' deck' + (plan.counts.incoming.decks === 1 ? '' : 's'));
+  goDecks();
+}
 
 function newId(prefix) {
   const rand = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2);
