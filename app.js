@@ -160,6 +160,79 @@ function parseBackupFile(raw) {
   };
 }
 
+/* ── Server sync (feature #24) ────────────────────────────────────
+   Decisions made BEFORE anything is sent to the backup server. Pure, so the
+   throttle and the safety interlocks can be tested without a browser or a server.
+
+   Why a throttle at all: nine functions call saveData(), including updateCardSrs()
+   and logReview() — which fire on every card answered. Without this, a review
+   session would POST dozens of times, and the server is append-only, so that is
+   dozens of files. */
+
+const SYNC_MIN_INTERVAL_MS = 10 * 60 * 1000;   // 10 minutes between automatic backups
+
+/* What the user typed in settings, made safe to fetch. '' means the feature is off
+   and the app behaves exactly as it did before there was a server. */
+function normalizeServerUrl(raw) {
+  const s = String(raw === null || raw === undefined ? '' : raw).trim();
+  if (!s) return '';
+
+  const withScheme = s.match(/^([a-z][a-z0-9+.\-]*):\/\//i);
+  let url;
+  if (withScheme) {
+    const scheme = withScheme[1].toLowerCase();
+    // The app fetches this address. Anything but http(s) — javascript:, data:,
+    // file: — is refused rather than stored.
+    if (scheme !== 'http' && scheme !== 'https') return '';
+    url = s;
+  } else if (/^[a-z][a-z0-9+.\-]*:(?!\d)/i.test(s)) {
+    return '';                      // scheme-like and not host:port → refuse
+  } else {
+    url = 'http://' + s;            // "localhost:8000" is what a person types
+  }
+  return url.replace(/\/+$/, '');
+}
+
+/* Should an automatic backup go out right now? */
+function shouldAutoSync(opts) {
+  const o = opts || {};
+  if (!o.serverUrl) return false;          // feature off
+  // Never push a failed read. loadData() hands back an empty library when it
+  // cannot parse the save (#19); sending that would poison the backup store with
+  // emptiness — the same class of damage, one layer further out.
+  if (o.dataReadFailed) return false;
+  if (!o.dirty) return false;              // nothing changed, nothing to send
+
+  if (o.lastSyncAt === null || o.lastSyncAt === undefined) return true;
+  const last = Number(o.lastSyncAt);
+  // Junk or a clock skewed into the future must not wedge backups shut forever.
+  if (!Number.isFinite(last) || last > o.now) return true;
+
+  return (o.now - last) >= SYNC_MIN_INTERVAL_MS;
+}
+
+/* The quiet line under the decks header, beside the existing backup nudge.
+   Same shape as backupStatus() so it can reuse the same component and tone. */
+function syncStatus(opts) {
+  const o = opts || {};
+  if (!o.serverUrl) return { show: false, level: 'off', text: '' };
+
+  if (o.lastError) {
+    return { show: true, level: 'warn',
+             text: 'Server backup failed: ' + o.lastError + '. Downloading a backup still works.' };
+  }
+
+  const last = Number(o.lastSyncAt);
+  if (o.lastSyncAt === null || o.lastSyncAt === undefined || !Number.isFinite(last)) {
+    return { show: true, level: 'warn', text: 'Not backed up to the server yet.' };
+  }
+
+  const days = Math.max(0, Math.floor((o.now - last) / 86400000));
+  return { show: true, level: 'quiet',
+           text: days === 0 ? 'Server backup: today.'
+                            : 'Server backup: ' + days + ' day' + (days === 1 ? '' : 's') + ' ago.' };
+}
+
 /* ── 1B-impure ───────────────────────────────────────────────────
    The write lock. Every destructive path in the app funnels through
    saveData(), so this single guard closes all of them at once. */
@@ -195,11 +268,28 @@ function renderBackupNudge() {
     deckCount: data.decks.length, cardCount: data.cards.length
   });
 
-  if (!s.show) { el.style.display = 'none'; return; }
+  // Feature #24: the server line shares this slot rather than adding a new one.
+  // Same component, same tone — no new visual language for a second backup.
+  const sync = syncStatus({
+    serverUrl: getServerUrl(), lastSyncAt: lastSyncAt(),
+    now: Date.now(), lastError: lastSyncError
+  });
+
+  if (!s.show && !sync.show) { el.style.display = 'none'; return; }
   el.style.display = '';
-  el.className = 'backup-nudge' + (s.level === 'fresh' ? ' quiet' : ' warn');
-  el.innerHTML = `<div>${escapeHtml(s.text)}</div>` + (s.level === 'fresh' ? ''
-    : `<button class="btn btn-outline btn-sm" onclick="exportData()">Back up now</button>`);
+  const anyWarning = (s.show && s.level !== 'fresh') || (sync.show && sync.level === 'warn');
+  el.className = 'backup-nudge' + (anyWarning ? ' warn' : ' quiet');
+
+  let html = '';
+  if (s.show) {
+    html += `<div>${escapeHtml(s.text)}</div>` + (s.level === 'fresh' ? ''
+      : `<button class="btn btn-outline btn-sm" onclick="exportData()">Back up now</button>`);
+  }
+  if (sync.show) {
+    html += `<div>${escapeHtml(sync.text)}</div>`
+          + `<button class="btn btn-outline btn-sm" onclick="onBackupToServer()">Back up to server</button>`;
+  }
+  el.innerHTML = html;
 }
 
 function loadData() {
@@ -264,8 +354,94 @@ function saveData(data, opts) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   dataReadFailed = false;      // whatever was wrong, this write resolved it
   dataReadFailReason = '';
+
+  // Feature #24. Every path that changes data funnels through here — nine callers,
+  // per the graph — so one hook covers all of them, exactly as the write lock above
+  // does. Deliberately not awaited: a backup must never delay or block a save.
+  syncDirty = true;
+  maybeAutoSync();
+
   return true;
 }
+
+/* ── Server sync, impure half (feature #24) ───────────────────────
+   The decisions live in the 1B pure block (normalizeServerUrl, shouldAutoSync,
+   syncStatus). This part does the talking. */
+
+const SERVER_URL_KEY = 'recall.serverUrl';
+const LAST_SYNC_KEY  = 'recall.lastSync';
+
+// Own keys, not inside recall.data — same reasoning as recall.lastBackup: these
+// describe this browser's setup, not your library, and must survive the import
+// that replaces recall.data wholesale.
+let syncDirty = false;
+let syncInFlight = false;
+let lastSyncError = '';
+
+function getServerUrl() { return normalizeServerUrl(localStorage.getItem(SERVER_URL_KEY)); }
+function lastSyncAt() {
+  const v = Number(localStorage.getItem(LAST_SYNC_KEY));
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+/* Send the library to the server. Returns true if it landed.
+   `quiet` is what separates automatic from manual: an automatic backup that cannot
+   reach the server must not interrupt studying, but a button you pressed must
+   always tell you what happened (#22 — no dead ends). */
+async function syncToServer(opts) {
+  const quiet = !!(opts && opts.quiet);
+  const url = getServerUrl();
+  if (!url) { if (!quiet) toast('No backup server set — add one in settings'); return false; }
+  if (syncInFlight) return false;
+
+  // Never push a failed read: loadData() hands back an empty library when it cannot
+  // parse the save (#19), and the server would be storing that emptiness.
+  if (dataReadFailed) {
+    if (!quiet) toast('Not backing up — your saved data could not be read');
+    return false;
+  }
+
+  syncInFlight = true;
+  try {
+    const payload = { app: 'recall', version: 1, exportedAt: new Date().toISOString(), data: loadData() };
+    const res = await fetch(url + '/backups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      // The server refuses empty and malformed backups on purpose. Say which.
+      let reason = '';
+      try { reason = (await res.json()).reason || ''; } catch (e) { /* no body */ }
+      throw new Error(reason === 'empty' ? 'there is nothing to back up yet' : (reason || ('HTTP ' + res.status)));
+    }
+
+    localStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
+    syncDirty = false;
+    lastSyncError = '';
+    if (!quiet) toast('Backed up to server');
+    return true;
+  } catch (e) {
+    lastSyncError = e.message === 'Failed to fetch' ? 'server not reachable' : e.message;
+    if (!quiet) toast('Server backup failed: ' + lastSyncError);
+    return false;
+  } finally {
+    syncInFlight = false;
+    renderBackupNudge();
+  }
+}
+
+/* Called after every save. The throttle lives in shouldAutoSync so it is testable. */
+function maybeAutoSync() {
+  const go = shouldAutoSync({
+    serverUrl: getServerUrl(), dirty: syncDirty, lastSyncAt: lastSyncAt(),
+    now: Date.now(), dataReadFailed
+  });
+  if (go) syncToServer({ quiet: true });
+}
+
+function onBackupToServer() { syncToServer({ quiet: false }); }
 
 function newId(prefix) {
   const rand = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Math.random()).slice(2);
@@ -1290,18 +1466,37 @@ function getApiKey() { return localStorage.getItem(KEY_STORAGE) || ''; }
 function openKeyModal() {
   document.getElementById('key-input').value = getApiKey();
   document.getElementById('key-error').textContent = '';
+  document.getElementById('server-input').value = localStorage.getItem(SERVER_URL_KEY) || '';
+  document.getElementById('server-error').textContent = '';
   document.getElementById('key-modal').classList.add('open');
   setTimeout(() => document.getElementById('key-input').focus(), 50);
 }
 function closeKeyModal() { document.getElementById('key-modal').classList.remove('open'); }
 
 function onSaveKey() {
+  // The server address is saved independently of the key: wanting your decks backed
+  // up does not mean wanting AI generation, and the key is no longer the only thing
+  // this modal holds.
+  const rawServer = document.getElementById('server-input').value;
+  const server = normalizeServerUrl(rawServer);
+  if (rawServer.trim() && !server) {
+    document.getElementById('server-error').textContent = 'That address must start with http:// or https://.';
+    return;
+  }
+  if (server) localStorage.setItem(SERVER_URL_KEY, server);
+  else localStorage.removeItem(SERVER_URL_KEY);
+  document.getElementById('server-error').textContent = '';
+
   const k = document.getElementById('key-input').value.trim();
-  if (!k) { document.getElementById('key-error').textContent = 'Paste your key, or press Remove.'; return; }
-  if (!k.startsWith('sk-ant-')) { document.getElementById('key-error').textContent = 'That doesn\'t look like an Anthropic key (should start with sk-ant-).'; return; }
-  localStorage.setItem(KEY_STORAGE, k);
+  if (k && !k.startsWith('sk-ant-')) {
+    document.getElementById('key-error').textContent = 'That doesn\'t look like an Anthropic key (should start with sk-ant-).';
+    return;
+  }
+  if (k) localStorage.setItem(KEY_STORAGE, k);
+
   closeKeyModal();
-  toast('Key saved');
+  renderBackupNudge();
+  toast('Settings saved');
 }
 function onClearKey() {
   localStorage.removeItem(KEY_STORAGE);

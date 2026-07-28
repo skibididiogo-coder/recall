@@ -94,6 +94,7 @@ h1.page{font-family:var(--font-display);font-weight:300;font-size:36px;letter-sp
 .field textarea{min-height:64px}
 .form-foot{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .form-error{font-size:13px;color:var(--error);min-height:18px}
+.field-hint{margin-top:6px;font-size:12px;line-height:1.5;color:var(--ink-3)}
 
 /* ── Card list ── */
 .card-list{display:flex;flex-direction:column;gap:10px;margin-top:24px}

@@ -549,17 +549,23 @@
 <!-- ============ API KEY MODAL ============ -->
 <div class="modal-backdrop" id="key-modal" onclick="if(event.target===this)closeKeyModal()">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="key-modal-title">
-    <h2 id="key-modal-title">Anthropic API key</h2>
-    <div class="modal-sub">Needed for AI card generation. Stored only in this browser, on this device — it never leaves your machine except to call Claude directly. Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</div>
+    <h2 id="key-modal-title">Settings</h2>
+    <div class="modal-sub">Both are stored only in this browser, on this device. The key is needed for AI card generation and never leaves your machine except to call Claude directly — get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</div>
     <div class="field">
       <label for="key-input">Key (starts with sk-ant-)</label>
       <input id="key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
     </div>
     <div class="form-error" id="key-error" style="margin-bottom:8px"></div>
+    <div class="field">
+      <label for="server-input">Backup server (optional)</label>
+      <input id="server-input" type="text" placeholder="http://localhost:8000" autocomplete="off" spellcheck="false">
+      <div class="field-hint">Your decks are copied here so they survive clearing your browser. Leave empty to turn this off — everything else works the same. Runs on this Mac, so it does not reach your phone.</div>
+    </div>
+    <div class="form-error" id="server-error" style="margin-bottom:8px"></div>
     <div class="modal-actions">
       <button class="btn btn-danger-ghost" onclick="onClearKey()">Remove key</button>
       <button class="btn btn-outline" onclick="closeKeyModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="onSaveKey()">Save key</button>
+      <button class="btn btn-primary" onclick="onSaveKey()">Save</button>
     </div>
   </div>
 </div>
