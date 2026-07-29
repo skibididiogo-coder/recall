@@ -544,3 +544,7 @@ li.tl-item:last-child{padding-bottom:0}
 .sheet-num{display:flex;justify-content:space-between;gap:16px;background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:8px 12px}
 .sheet-num span{color:var(--ink-2)}
 .sheet-num strong{color:var(--ink);font-weight:600;text-align:right}
+
+/* Offline-readiness shortfall in Settings (feature #26). Warning colour, not error:
+   an incomplete cache is worth knowing about, not alarming. */
+.field-hint-warn{color:var(--warning);font-weight:500}

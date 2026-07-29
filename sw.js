@@ -4,138 +4,138 @@
 // Keeps its exact filename (no "(C)" prefix) because a service worker's PATH defines
 // its scope — it must sit at the app root. Tool-imposed name, per the vault CLAUDE.md.
 
-const BUILD_ID = '4575d27d3ebd';
+const BUILD_ID = '8233d10d8ebf';
 const CACHE    = 'recall-' + BUILD_ID;
 const SHELL    = new URL('./index.html', self.location).href;
 
 const PRECACHE = [
-  './app.js',
-  './audio/af_heart-058d272a-26.mp3',
-  './audio/af_heart-071ffe08-40.mp3',
-  './audio/af_heart-150be83f-19.mp3',
-  './audio/af_heart-1af2b433-73.mp3',
-  './audio/af_heart-2052d246-100.mp3',
-  './audio/af_heart-24915fb0-31.mp3',
-  './audio/af_heart-24cfef28-128.mp3',
-  './audio/af_heart-25249d79-64.mp3',
-  './audio/af_heart-2888e8c3-31.mp3',
-  './audio/af_heart-29213848-18.mp3',
-  './audio/af_heart-2f0fb333-60.mp3',
-  './audio/af_heart-305500ed-60.mp3',
-  './audio/af_heart-3e2ed578-96.mp3',
-  './audio/af_heart-4499a589-52.mp3',
-  './audio/af_heart-47e2ca65-84.mp3',
-  './audio/af_heart-4b08175f-52.mp3',
-  './audio/af_heart-4b6e3a2d-57.mp3',
-  './audio/af_heart-4b9e9feb-24.mp3',
-  './audio/af_heart-4bb20b1a-22.mp3',
-  './audio/af_heart-4e9bea2e-35.mp3',
-  './audio/af_heart-4feb59dc-51.mp3',
-  './audio/af_heart-54fe21be-45.mp3',
-  './audio/af_heart-552f06eb-19.mp3',
-  './audio/af_heart-564b17bd-45.mp3',
-  './audio/af_heart-58b5de2a-38.mp3',
-  './audio/af_heart-5e0bbf4a-20.mp3',
-  './audio/af_heart-5e9cf64d-33.mp3',
-  './audio/af_heart-5f6711bd-87.mp3',
-  './audio/af_heart-65cf4968-70.mp3',
-  './audio/af_heart-66673bbe-66.mp3',
-  './audio/af_heart-6f8cf131-68.mp3',
-  './audio/af_heart-6fe5674f-36.mp3',
-  './audio/af_heart-75ec4750-44.mp3',
-  './audio/af_heart-7659a067-474.mp3',
-  './audio/af_heart-79dcd35a-57.mp3',
-  './audio/af_heart-7aa5c25b-25.mp3',
-  './audio/af_heart-7b139860-62.mp3',
-  './audio/af_heart-7d458c6c-27.mp3',
-  './audio/af_heart-821cf316-31.mp3',
-  './audio/af_heart-82bd2bc2-79.mp3',
-  './audio/af_heart-831487bd-26.mp3',
-  './audio/af_heart-87bcb1c5-52.mp3',
-  './audio/af_heart-987c1b74-23.mp3',
-  './audio/af_heart-98a75b7b-44.mp3',
-  './audio/af_heart-9b824fe1-78.mp3',
-  './audio/af_heart-9b915ff8-64.mp3',
-  './audio/af_heart-9de2c952-9.mp3',
-  './audio/af_heart-a32ca92d-165.mp3',
-  './audio/af_heart-a7dfdfba-128.mp3',
-  './audio/af_heart-a9568c41-36.mp3',
-  './audio/af_heart-aa790163-45.mp3',
-  './audio/af_heart-acfde43c-97.mp3',
-  './audio/af_heart-ad70a2e8-53.mp3',
-  './audio/af_heart-ade726cb-109.mp3',
-  './audio/af_heart-b1399326-26.mp3',
-  './audio/af_heart-b89aed9e-65.mp3',
-  './audio/af_heart-bdcb1995-64.mp3',
-  './audio/af_heart-c153af40-35.mp3',
-  './audio/af_heart-c18db970-71.mp3',
-  './audio/af_heart-c4e00d26-87.mp3',
-  './audio/af_heart-c59e98b6-52.mp3',
-  './audio/af_heart-d29b1ff8-82.mp3',
-  './audio/af_heart-d3fffc32-68.mp3',
-  './audio/af_heart-d46578f1-77.mp3',
-  './audio/af_heart-d5fa72be-64.mp3',
-  './audio/af_heart-d5fe68c7-60.mp3',
-  './audio/af_heart-dbd46073-28.mp3',
-  './audio/af_heart-dd296d7f-164.mp3',
-  './audio/af_heart-dd551015-44.mp3',
-  './audio/af_heart-ddbd142f-62.mp3',
-  './audio/af_heart-ded2981e-25.mp3',
-  './audio/af_heart-e2f6fcac-122.mp3',
-  './audio/af_heart-e3a44d27-34.mp3',
-  './audio/af_heart-e5fe70ff-38.mp3',
-  './audio/af_heart-e8259b06-45.mp3',
-  './audio/af_heart-ec676052-50.mp3',
-  './audio/af_heart-f03ccc5c-180.mp3',
-  './audio/af_heart-f3b75b52-52.mp3',
-  './audio/af_heart-f5e8e540-149.mp3',
-  './audio/af_heart-fb4c9da4-48.mp3',
-  './audio/af_heart-fcfec728-50.mp3',
-  './audio/clips.js',
-  './audio/pf_dora-1890a752-54.mp3',
-  './audio/pf_dora-1af2b433-73.mp3',
-  './audio/pf_dora-24cfef28-128.mp3',
-  './audio/pf_dora-2888e8c3-31.mp3',
-  './audio/pf_dora-305500ed-60.mp3',
-  './audio/pf_dora-3e2ed578-96.mp3',
-  './audio/pf_dora-4499a589-52.mp3',
-  './audio/pf_dora-4e9bea2e-35.mp3',
-  './audio/pf_dora-54fe21be-45.mp3',
-  './audio/pf_dora-564b17bd-45.mp3',
-  './audio/pf_dora-5e9cf64d-33.mp3',
-  './audio/pf_dora-75ec4750-44.mp3',
-  './audio/pf_dora-7659a067-474.mp3',
-  './audio/pf_dora-a32ca92d-165.mp3',
-  './audio/pf_dora-a7dfdfba-128.mp3',
-  './audio/pf_dora-a9568c41-36.mp3',
-  './audio/pf_dora-acfde43c-97.mp3',
-  './audio/pf_dora-ade726cb-109.mp3',
-  './audio/pf_dora-bdcb1995-64.mp3',
-  './audio/pf_dora-c18db970-71.mp3',
-  './audio/pf_dora-c4e00d26-87.mp3',
-  './audio/pf_dora-c59e98b6-52.mp3',
-  './audio/pf_dora-d29b1ff8-82.mp3',
-  './audio/pf_dora-d3fffc32-68.mp3',
-  './audio/pf_dora-dd296d7f-164.mp3',
-  './audio/pf_dora-dd551015-44.mp3',
-  './audio/pf_dora-e2f6fcac-122.mp3',
-  './audio/pf_dora-e8259b06-45.mp3',
-  './audio/pf_dora-ec676052-50.mp3',
-  './audio/pf_dora-f03ccc5c-180.mp3',
-  './audio/pf_dora-f5e8e540-149.mp3',
-  './fonts/dm-sans-latin-ext.woff2',
-  './fonts/dm-sans-latin.woff2',
-  './fonts/inter-latin-ext.woff2',
-  './fonts/inter-latin.woff2',
-  './fonts/jetbrains-mono-latin-ext.woff2',
-  './fonts/jetbrains-mono-latin.woff2',
-  './icons/apple-touch-icon-180.png',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/icon-maskable-512.png',
-  './index.html',
-  './manifest.json',
-  './styles.css',
+  'app.js',
+  'audio/af_heart-058d272a-26.mp3',
+  'audio/af_heart-071ffe08-40.mp3',
+  'audio/af_heart-150be83f-19.mp3',
+  'audio/af_heart-1af2b433-73.mp3',
+  'audio/af_heart-2052d246-100.mp3',
+  'audio/af_heart-24915fb0-31.mp3',
+  'audio/af_heart-24cfef28-128.mp3',
+  'audio/af_heart-25249d79-64.mp3',
+  'audio/af_heart-2888e8c3-31.mp3',
+  'audio/af_heart-29213848-18.mp3',
+  'audio/af_heart-2f0fb333-60.mp3',
+  'audio/af_heart-305500ed-60.mp3',
+  'audio/af_heart-3e2ed578-96.mp3',
+  'audio/af_heart-4499a589-52.mp3',
+  'audio/af_heart-47e2ca65-84.mp3',
+  'audio/af_heart-4b08175f-52.mp3',
+  'audio/af_heart-4b6e3a2d-57.mp3',
+  'audio/af_heart-4b9e9feb-24.mp3',
+  'audio/af_heart-4bb20b1a-22.mp3',
+  'audio/af_heart-4e9bea2e-35.mp3',
+  'audio/af_heart-4feb59dc-51.mp3',
+  'audio/af_heart-54fe21be-45.mp3',
+  'audio/af_heart-552f06eb-19.mp3',
+  'audio/af_heart-564b17bd-45.mp3',
+  'audio/af_heart-58b5de2a-38.mp3',
+  'audio/af_heart-5e0bbf4a-20.mp3',
+  'audio/af_heart-5e9cf64d-33.mp3',
+  'audio/af_heart-5f6711bd-87.mp3',
+  'audio/af_heart-65cf4968-70.mp3',
+  'audio/af_heart-66673bbe-66.mp3',
+  'audio/af_heart-6f8cf131-68.mp3',
+  'audio/af_heart-6fe5674f-36.mp3',
+  'audio/af_heart-75ec4750-44.mp3',
+  'audio/af_heart-7659a067-474.mp3',
+  'audio/af_heart-79dcd35a-57.mp3',
+  'audio/af_heart-7aa5c25b-25.mp3',
+  'audio/af_heart-7b139860-62.mp3',
+  'audio/af_heart-7d458c6c-27.mp3',
+  'audio/af_heart-821cf316-31.mp3',
+  'audio/af_heart-82bd2bc2-79.mp3',
+  'audio/af_heart-831487bd-26.mp3',
+  'audio/af_heart-87bcb1c5-52.mp3',
+  'audio/af_heart-987c1b74-23.mp3',
+  'audio/af_heart-98a75b7b-44.mp3',
+  'audio/af_heart-9b824fe1-78.mp3',
+  'audio/af_heart-9b915ff8-64.mp3',
+  'audio/af_heart-9de2c952-9.mp3',
+  'audio/af_heart-a32ca92d-165.mp3',
+  'audio/af_heart-a7dfdfba-128.mp3',
+  'audio/af_heart-a9568c41-36.mp3',
+  'audio/af_heart-aa790163-45.mp3',
+  'audio/af_heart-acfde43c-97.mp3',
+  'audio/af_heart-ad70a2e8-53.mp3',
+  'audio/af_heart-ade726cb-109.mp3',
+  'audio/af_heart-b1399326-26.mp3',
+  'audio/af_heart-b89aed9e-65.mp3',
+  'audio/af_heart-bdcb1995-64.mp3',
+  'audio/af_heart-c153af40-35.mp3',
+  'audio/af_heart-c18db970-71.mp3',
+  'audio/af_heart-c4e00d26-87.mp3',
+  'audio/af_heart-c59e98b6-52.mp3',
+  'audio/af_heart-d29b1ff8-82.mp3',
+  'audio/af_heart-d3fffc32-68.mp3',
+  'audio/af_heart-d46578f1-77.mp3',
+  'audio/af_heart-d5fa72be-64.mp3',
+  'audio/af_heart-d5fe68c7-60.mp3',
+  'audio/af_heart-dbd46073-28.mp3',
+  'audio/af_heart-dd296d7f-164.mp3',
+  'audio/af_heart-dd551015-44.mp3',
+  'audio/af_heart-ddbd142f-62.mp3',
+  'audio/af_heart-ded2981e-25.mp3',
+  'audio/af_heart-e2f6fcac-122.mp3',
+  'audio/af_heart-e3a44d27-34.mp3',
+  'audio/af_heart-e5fe70ff-38.mp3',
+  'audio/af_heart-e8259b06-45.mp3',
+  'audio/af_heart-ec676052-50.mp3',
+  'audio/af_heart-f03ccc5c-180.mp3',
+  'audio/af_heart-f3b75b52-52.mp3',
+  'audio/af_heart-f5e8e540-149.mp3',
+  'audio/af_heart-fb4c9da4-48.mp3',
+  'audio/af_heart-fcfec728-50.mp3',
+  'audio/clips.js',
+  'audio/pf_dora-1890a752-54.mp3',
+  'audio/pf_dora-1af2b433-73.mp3',
+  'audio/pf_dora-24cfef28-128.mp3',
+  'audio/pf_dora-2888e8c3-31.mp3',
+  'audio/pf_dora-305500ed-60.mp3',
+  'audio/pf_dora-3e2ed578-96.mp3',
+  'audio/pf_dora-4499a589-52.mp3',
+  'audio/pf_dora-4e9bea2e-35.mp3',
+  'audio/pf_dora-54fe21be-45.mp3',
+  'audio/pf_dora-564b17bd-45.mp3',
+  'audio/pf_dora-5e9cf64d-33.mp3',
+  'audio/pf_dora-75ec4750-44.mp3',
+  'audio/pf_dora-7659a067-474.mp3',
+  'audio/pf_dora-a32ca92d-165.mp3',
+  'audio/pf_dora-a7dfdfba-128.mp3',
+  'audio/pf_dora-a9568c41-36.mp3',
+  'audio/pf_dora-acfde43c-97.mp3',
+  'audio/pf_dora-ade726cb-109.mp3',
+  'audio/pf_dora-bdcb1995-64.mp3',
+  'audio/pf_dora-c18db970-71.mp3',
+  'audio/pf_dora-c4e00d26-87.mp3',
+  'audio/pf_dora-c59e98b6-52.mp3',
+  'audio/pf_dora-d29b1ff8-82.mp3',
+  'audio/pf_dora-d3fffc32-68.mp3',
+  'audio/pf_dora-dd296d7f-164.mp3',
+  'audio/pf_dora-dd551015-44.mp3',
+  'audio/pf_dora-e2f6fcac-122.mp3',
+  'audio/pf_dora-e8259b06-45.mp3',
+  'audio/pf_dora-ec676052-50.mp3',
+  'audio/pf_dora-f03ccc5c-180.mp3',
+  'audio/pf_dora-f5e8e540-149.mp3',
+  'fonts/dm-sans-latin-ext.woff2',
+  'fonts/dm-sans-latin.woff2',
+  'fonts/inter-latin-ext.woff2',
+  'fonts/inter-latin.woff2',
+  'fonts/jetbrains-mono-latin-ext.woff2',
+  'fonts/jetbrains-mono-latin.woff2',
+  'icons/apple-touch-icon-180.png',
+  'icons/icon-192.png',
+  'icons/icon-512.png',
+  'icons/icon-maskable-512.png',
+  'index.html',
+  'manifest.json',
+  'styles.css',
 ];
 
 /* ── PURE — routing decisions, extracted and tested by (C) test-pwa.mjs.
@@ -163,12 +163,46 @@ function cachesToDelete(existingNames, buildId) {
   const keep = 'recall-' + buildId;
   return existingNames.filter(n => n.startsWith('recall-') && n !== keep);
 }
+
+/**
+ * Split the precache into an atomic shell and best-effort clips.
+ *
+ * WHY: cache.addAll() is ATOMIC. One failed request out of 127 rejected the whole
+ * install, created the cache, left it EMPTY, and reported nothing — while the app still
+ * opened from the browser's own HTTP cache, so only the 7 MB of audio was missing.
+ * Reproduced 2026-07-28 by removing a single clip.
+ *
+ * The shell stays atomic deliberately: a half-cached app SHOULD fail loudly. Only the
+ * clips are best-effort, so one bad clip costs one clip.
+ *
+ * audio/clips.js is shell, not a clip — without it no audio works at all.
+ */
+function precachePlan(list) {
+  const isClip = p => p.replace(/^\.\//, '').startsWith('audio/') && p.endsWith('.mp3');
+  return { shell: list.filter(p => !isClip(p)), audio: list.filter(isClip) };
+}
 /* ── END PURE ── */
 
-// addAll is atomic: one 404 rejects the whole thing and the install fails. That is the
-// behaviour we want — a half-populated cache would look fine until the wifi went off.
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRECACHE)));
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    const plan  = precachePlan(PRECACHE);
+
+    // Atomic on purpose — if the app shell cannot be cached, fail the install.
+    await cache.addAll(plan.shell);
+
+    // Best-effort, one request at a time. A missing or flaky clip must never take the
+    // whole offline mode down with it.
+    for (const path of plan.audio) {
+      try {
+        const res = await fetch(path, { cache: 'reload' });
+        if (res && res.ok) await cache.put(path, res);
+      } catch (e) {
+        // Deliberately swallowed: the app reports the shortfall via cacheStatus() in
+        // Settings, which is where an incomplete cache becomes visible instead of silent.
+      }
+    }
+  })());
   // No skipWaiting(): activating mid-session would run the new worker underneath the
   // old app.js, possibly mid-review-card. The new build takes over on next launch.
 });
@@ -190,19 +224,31 @@ self.addEventListener('fetch', event => {
     // "/recall/index.html" — a different URL, so a plain cache lookup would miss and
     // the app would fail to open offline. Every in-scope navigation resolves to the
     // cached shell instead.
+    // ignoreVary is NOT optional. GitHub Pages sends "Vary: Accept-Encoding" on every
+    // file, and caches.match() HONOURS Vary: the precache stored each response keyed on
+    // the Accept-Encoding that addAll() used, while a media element requests with
+    // "Accept-Encoding: identity;q=1, *;q=0". Different value, Vary mismatch, MISS —
+    // every request fell through to the network, so offline only worked when the
+    // browser's own HTTP disk cache happened to still hold the file. That is why audio
+    // was intermittent: 0/112 clips playable once the disk cache was cleared.
+    //
+    // Local testing could not see it because python -m http.server sends no Vary at all.
+    // Verify with "04 System/(C) serve-like-pages.py", never the bare http.server.
     if (req.mode === 'navigate') {
-      const shell = await caches.match(SHELL);
+      const shell = await caches.match(SHELL, { ignoreVary: true });
       if (shell) return shell;
     }
-    const hit = await caches.match(req);
+    const hit = await caches.match(req, { ignoreVary: true });
     if (hit) return hit;
     return fetch(req);
   })());
 });
 
 // The page asks which build it is running, for the update notice and the settings modal.
+// The 'expected' count lets the app compare what SHOULD be cached against what actually
+// is, which is what turns a failed precache from silent into visible.
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'build-id' && event.ports[0]) {
-    event.ports[0].postMessage({ buildId: BUILD_ID });
+    event.ports[0].postMessage({ buildId: BUILD_ID, expected: PRECACHE.length });
   }
 });

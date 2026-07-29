@@ -1656,8 +1656,19 @@ function openKeyModal() {
   // Which code am I actually running? A waiting service worker cannot activate while
   // any tab is still open, so "I pushed the fix" and "I am running the fix" are not
   // the same statement. This makes the difference visible instead of silent.
-  document.getElementById('build-id-line').textContent =
+  const buildLine = document.getElementById('build-id-line');
+  buildLine.textContent =
     currentBuildId ? 'Version ' + currentBuildId : 'Version — not installed (running from the network)';
+  // Offline readiness, filled in asynchronously. A precache that failed leaves the app
+  // looking healthy and only the audio missing, so the shortfall has to be stated.
+  if (currentBuildId) {
+    countCachedEntries().then(cached => {
+      if (cached === null) return;
+      const s = cacheStatus(cached, expectedCacheEntries);
+      buildLine.textContent = 'Version ' + currentBuildId + ' · ' + s.text;
+      buildLine.classList.toggle('field-hint-warn', !s.ready);
+    });
+  }
   document.getElementById('key-modal').classList.add('open');
   setTimeout(() => document.getElementById('key-input').focus(), 50);
 }
@@ -5199,11 +5210,27 @@ function updateNotice(storedId, currentId) {
   return { show: true, text: 'Updated to the latest version', store: currentId };
 }
 
+/**
+ * Is everything needed for offline actually cached, and if not, say how short it is.
+ *
+ * This exists because the failure it describes was INVISIBLE. A precache that fails
+ * leaves the app looking perfectly healthy — it still opens, because the browser's own
+ * HTTP cache holds the small files — and only the audio is missing. Nothing said so.
+ *
+ * Never claims ready on a partial cache, however close.
+ */
+function cacheStatus(cached, expected) {
+  if (!expected)          return { ready: false, text: 'Offline: not measured yet' };
+  if (cached >= expected) return { ready: true,  text: 'Offline: all ' + expected + ' files ready' };
+  return { ready: false, text: 'Offline: only ' + cached + '/' + expected + ' files ready' };
+}
+
 /* ── END PURE pwa ── */
 
 let currentBuildId = null;
+let expectedCacheEntries = 0;
 
-/** Ask the worker which build it is. Resolves null if it never answers. */
+/** Ask the worker which build it is, and how many files it expects to have cached. */
 function askBuildId(worker) {
   return new Promise(resolve => {
     if (!worker) return resolve(null);
@@ -5211,10 +5238,22 @@ function askBuildId(worker) {
     const timer = setTimeout(() => resolve(null), 2000);
     channel.port1.onmessage = e => {
       clearTimeout(timer);
+      if (e.data && e.data.expected) expectedCacheEntries = e.data.expected;
       resolve((e.data && e.data.buildId) || null);
     };
     worker.postMessage({ type: 'build-id' }, [channel.port2]);
   });
+}
+
+/** Count what is actually in this build's cache. Null when it cannot be determined. */
+async function countCachedEntries() {
+  if (!('caches' in window) || !currentBuildId) return null;
+  try {
+    const cache = await caches.open('recall-' + currentBuildId);
+    return (await cache.keys()).length;
+  } catch (e) {
+    return null;
+  }
 }
 
 async function initServiceWorker() {
