@@ -193,6 +193,28 @@ function normalizeServerUrl(raw) {
   return url.replace(/\/+$/, '');
 }
 
+/**
+ * What saving the Settings modal should do to the stored server address.
+ *
+ * The API key and the server address share one modal and one Save button, so emptying
+ * the address field must never quietly switch backups off. Returns the action plus a
+ * notice the caller shows — 'remove' without a notice is the bug this exists to prevent.
+ */
+function serverUrlChange(rawInput, storedUrl) {
+  const raw = (rawInput || '').trim();
+  const url = normalizeServerUrl(raw);
+
+  if (raw && !url) {
+    return { action: 'error', url: '', notice: 'That address must start with http:// or https://.' };
+  }
+  if (url) return { action: 'set', url, notice: '' };
+  // Field is empty. Only a REMOVAL is worth announcing — otherwise every key save nags.
+  if (storedUrl) {
+    return { action: 'remove', url: '', notice: 'Server backups turned off — no address set.' };
+  }
+  return { action: 'none', url: '', notice: '' };
+}
+
 /* Should an automatic backup go out right now? */
 function shouldAutoSync(opts) {
   const o = opts || {};
@@ -215,7 +237,15 @@ function shouldAutoSync(opts) {
    Same shape as backupStatus() so it can reuse the same component and tone. */
 function syncStatus(opts) {
   const o = opts || {};
-  if (!o.serverUrl) return { show: false, level: 'off', text: '' };
+  // An OFF backup feature is VISIBLE. This used to return show:false, on the reasoning
+  // that a feature which is off should not occupy space. That reasoning cost two days:
+  // after the file:// → github.io move the stored address was gone (an export carries
+  // decks, not settings), so backups were off, nothing was sent, and the app said
+  // nothing at all. Invisible-off is indistinguishable from working.
+  if (!o.serverUrl) {
+    return { show: true, level: 'warn',
+             text: 'Server backups are off — no address set in Settings.' };
+  }
 
   if (o.lastError) {
     return { show: true, level: 'warn',
@@ -1679,13 +1709,13 @@ function onSaveKey() {
   // up does not mean wanting AI generation, and the key is no longer the only thing
   // this modal holds.
   const rawServer = document.getElementById('server-input').value;
-  const server = normalizeServerUrl(rawServer);
-  if (rawServer.trim() && !server) {
-    document.getElementById('server-error').textContent = 'That address must start with http:// or https://.';
+  const change = serverUrlChange(rawServer, localStorage.getItem(SERVER_URL_KEY));
+  if (change.action === 'error') {
+    document.getElementById('server-error').textContent = change.notice;
     return;
   }
-  if (server) localStorage.setItem(SERVER_URL_KEY, server);
-  else localStorage.removeItem(SERVER_URL_KEY);
+  if (change.action === 'set')    localStorage.setItem(SERVER_URL_KEY, change.url);
+  if (change.action === 'remove') localStorage.removeItem(SERVER_URL_KEY);
   document.getElementById('server-error').textContent = '';
 
   const k = document.getElementById('key-input').value.trim();
@@ -1697,7 +1727,9 @@ function onSaveKey() {
 
   closeKeyModal();
   renderBackupNudge();
-  toast('Settings saved');
+  // Turning backups off is announced, never silent — the notice wins over the generic
+  // confirmation, because it is the one thing here worth noticing.
+  toast(change.notice || 'Settings saved');
 }
 function onClearKey() {
   localStorage.removeItem(KEY_STORAGE);
