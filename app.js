@@ -51,7 +51,7 @@ const MS_PER_DAY = 86400000;
 function parseSavedData(raw) {
   // No key at all = a genuinely new install. Empty, but not a fault.
   if (raw === null || raw === undefined || raw === '') {
-    return { ok: true, empty: true, data: { decks: [], cards: [], log: {} } };
+    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [] } };
   }
 
   let parsed;
@@ -72,7 +72,12 @@ function parseSavedData(raw) {
     data: {
       decks: parsed.decks,
       cards: parsed.cards,
-      log: (parsed.log && typeof parsed.log === 'object') ? parsed.log : {}
+      log: (parsed.log && typeof parsed.log === 'object') ? parsed.log : {},
+      // `assignments` (feature #27) was added last and must NEVER make an older save
+      // unreadable. Anything that is not an array degrades to [] rather than becoming
+      // a `wrong-shape` refusal, because a refusal here arms the #19 write lock
+      // against a library that is otherwise perfectly good.
+      assignments: Array.isArray(parsed.assignments) ? parsed.assignments : []
     }
   };
 }
@@ -155,7 +160,17 @@ function parseBackupFile(raw) {
     data: {
       decks: incoming.decks,
       cards: incoming.cards,
-      log: (incoming.log && typeof incoming.log === 'object') ? incoming.log : {}
+      log: (incoming.log && typeof incoming.log === 'object') ? incoming.log : {},
+      // Same tolerance as parseSavedData: a backup written before feature #27 has no
+      // assignments key and must still import cleanly.
+      //
+      // The `empty` refusal above is deliberately NOT relaxed for assignments. A
+      // library holding only assignments and no decks or cards still counts as empty
+      // and is still refused — that is the feature #23 firewall against a truncated
+      // export overwriting a real library, and it is enforced identically in
+      // exportData(), restorePlan() and the Python backend. Weakening it in one place
+      // only would reopen the hole. Pinned by check C16 in (C) test-assignments.mjs.
+      assignments: Array.isArray(incoming.assignments) ? incoming.assignments : []
     }
   };
 }
@@ -323,20 +338,42 @@ function restorePlan(opts) {
   }
 
   const counts = {
-    current:  { decks: (current.decks || []).length, cards: (current.cards || []).length },
-    incoming: { decks: incoming.decks.length,        cards: incoming.cards.length }
+    current: {
+      decks: (current.decks || []).length,
+      cards: (current.cards || []).length,
+      assignments: (current.assignments || []).length
+    },
+    incoming: {
+      decks: incoming.decks.length,
+      cards: incoming.cards.length,
+      assignments: (incoming.assignments || []).length
+    }
   };
 
-  const have = counts.current.decks === 0 && counts.current.cards === 0
+  /* Assignments (feature #27) are named ONLY when either side has some.
+     With none on either side the sentence stays byte-identical to the one that
+     shipped and was reviewed before #27 — "and 0 assignments" is noise in a dialog
+     whose entire value is that it gets read, and everyone who does not use the
+     feature would pay for it. When either side is non-zero the number appears, and
+     that covers the only case where a restore can lose an assignment. Pinned by
+     checks R43 and R44 in (C) test-assignments.mjs. */
+  const showAsg = counts.current.assignments > 0 || counts.incoming.assignments > 0;
+  const tail = (c) => showAsg
+    ? plural(c.decks, 'deck') + ', ' + plural(c.cards, 'card') + ' and ' +
+      plural(c.assignments, 'assignment')
+    : plural(c.decks, 'deck') + ' and ' + plural(c.cards, 'card');
+
+  const nothingHere = counts.current.decks === 0 && counts.current.cards === 0 &&
+                      counts.current.assignments === 0;
+  const have = nothingHere
     ? 'You have nothing saved here right now.'
-    : 'You have ' + plural(counts.current.decks, 'deck') + ' and ' +
-      plural(counts.current.cards, 'card') + ' right now.';
+    : 'You have ' + tail(counts.current) + ' right now.';
 
   return {
     ok: true,
     counts,
-    warning: have + ' This backup has ' + plural(counts.incoming.decks, 'deck') + ' and ' +
-             plural(counts.incoming.cards, 'card') + '. Your current decks are copied to the ' +
+    warning: have + ' This backup has ' + tail(counts.incoming) +
+             '. Your current decks are copied to the ' +
              'server first, so this can be undone.'
   };
 }
@@ -411,7 +448,7 @@ function loadData() {
     dataReadFailReason = result.reason;
     console.error('Recall could not read your saved data (' + result.reason +
                   '). Nothing has been changed. Writing is blocked until this is resolved.');
-    return { decks: [], cards: [], log: {} };
+    return { decks: [], cards: [], log: {}, assignments: [] };
   }
 
   dataReadFailed = false;
@@ -443,7 +480,12 @@ function loadData() {
     const cards = (parsed.cards || []).map(c => c.srs ? c : { ...c, srs: newSrs() });
     // `log` (the daily study history) was added later — default it for old saves.
     const log = parsed.log || {};
-    return { decks, cards, log };
+    // Already normalized by parseSavedData; taken straight through, NOT re-derived.
+    // This return is the trap: parseSavedData hands back a clean object and this
+    // function reassembles it from scratch, so it reads like a pass-through and is
+    // not. Fixing parseSavedData alone still loses every assignment, one line later.
+    const assignments = parsed.assignments;
+    return { decks, cards, log, assignments };
   }
 }
 
@@ -769,6 +811,144 @@ function dueCards(deckId) {
 }
 function dueCount(deckId) { return dueCards(deckId).length; }
 
+/* ── PURE assignments ────────────────────────────────────────────
+   1E. ASSIGNMENTS — school tasks (feature #27), pure half.
+
+   Everything here is a plain function of its arguments: no localStorage, no DOM,
+   no clock of its own. `now` is always passed in, so "is this overdue" is testable
+   without waiting for tomorrow.
+
+   THIS BLOCK MUST NOT REFERENCE ANYTHING OUTSIDE ITSELF. (C) test-assignments.mjs
+   lifts it out with new Function() and evaluates it standalone; naming an outside
+   identifier (dayKey, MS_PER_DAY, DAY) throws a ReferenceError that takes the whole
+   slice down and fakes a failure for every check in the suite. Hence the local
+   day constant below rather than reusing one from section 1A.
+   ---------------------------------------------------------------- */
+
+const ASSIGNMENT_PRIORITIES = ['high', 'med', 'low'];
+const PRIORITY_RANK = { high: 0, med: 1, low: 2 };
+/* An unrecognised priority sorts after every known one instead of crashing the
+   screen. Bad data should degrade the ordering, never the render. */
+const PRIORITY_RANK_UNKNOWN = ASSIGNMENT_PRIORITIES.length;
+
+/* Midnight local time on the day `ts` falls in. Local, not UTC: a due date is a
+   calendar day the way a person means it, not an instant. */
+function startOfDay(ts) {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function priorityRank(priority) {
+  return priority in PRIORITY_RANK ? PRIORITY_RANK[priority] : PRIORITY_RANK_UNKNOWN;
+}
+
+/* Coerce anything the UI (or an imported backup) hands over into a well-formed
+   assignment body. Kept separate from createAssignment so the validation is
+   testable without a browser — the same split as parseSavedData/loadData. */
+function normalizeAssignment(fields, now) {
+  const f = fields || {};
+  const dueAt = Number(f.dueAt);
+  return {
+    title: String(f.title == null ? '' : f.title).trim(),
+    subject: String(f.subject == null ? '' : f.subject).trim(),
+    // 0 means "no due date". Anything unparseable becomes 0 rather than NaN,
+    // which would poison every comparison it touches.
+    dueAt: Number.isFinite(dueAt) && dueAt > 0 ? dueAt : 0,
+    priority: ASSIGNMENT_PRIORITIES.includes(f.priority) ? f.priority : 'med',
+    deckId: String(f.deckId == null ? '' : f.deckId),
+    done: f.done === true,
+    createdAt: Number.isFinite(Number(f.createdAt)) && Number(f.createdAt) > 0
+      ? Number(f.createdAt) : now
+  };
+}
+
+/* Overdue needs BOTH terms: a deadline that has passed, and work not yet done.
+   The comparison is against the start of today, not against `now` — dueAt is a
+   day, so `dueAt < now` would mark everything due today as overdue from 00:01. */
+function isOverdue(a, now) {
+  if (!a || a.done === true) return false;
+  if (!a.dueAt) return false;              // 0 = no deadline, can never be late
+  return a.dueAt < startOfDay(now);
+}
+
+function overdueAssignments(list, now) {
+  return (list || []).filter(a => isOverdue(a, now));
+}
+
+/* Undated assignments sort LAST in due order. A naive ascending sort puts dueAt 0
+   first, so "no deadline" would render as the most urgent thing on the screen. */
+function dueOrder(a, b) {
+  const ax = a.dueAt || Infinity;
+  const bx = b.dueAt || Infinity;
+  if (ax !== bx) return ax - bx;
+  const pr = priorityRank(a.priority) - priorityRank(b.priority);
+  if (pr !== 0) return pr;
+  return (a.createdAt || 0) - (b.createdAt || 0);   // last resort, so order is stable
+}
+
+function priorityOrder(a, b) {
+  const pr = priorityRank(a.priority) - priorityRank(b.priority);
+  if (pr !== 0) return pr;
+  return (a.dueAt || Infinity) - (b.dueAt || Infinity);
+}
+
+/* Spread before sorting: Array.prototype.sort is in-place, and the array being
+   sorted is the one loadData() handed out. */
+function sortAssignments(list, mode) {
+  return [...(list || [])].sort(mode === 'priority' ? priorityOrder : dueOrder);
+}
+
+/* Completed assignments drop out of the active list but are NEVER removed from the
+   library — a "done" flag that erases the record is a destructive default wearing a
+   harmless label. `showCompleted` brings them back. */
+function filterAssignments(list, opts) {
+  const o = opts || {};
+  const subject = String(o.subject || '').trim().toLowerCase();
+  return (list || []).filter(a => {
+    if (!o.showCompleted && a.done) return false;
+    // Case-insensitive, the same comparison filterDecks already makes on tags.
+    if (subject && String(a.subject || '').toLowerCase() !== subject) return false;
+    return true;
+  });
+}
+/* ── END PURE assignments */
+
+/* ── 1F. ASSIGNMENTS — CRUD ──────────────────────────────────────
+   The impure half. Every write funnels through saveData(), so the #19 write lock
+   covers these paths too.
+
+   `data.assignments` is read directly, with NO `|| []` fallback. That is deliberate:
+   a fallback would mask a reverted whitelist as "the assignment vanishes on reload",
+   which is exactly the silent failure this feature was built to prevent. Without it
+   the seam fails loudly and a named test can prove it.
+   ---------------------------------------------------------------- */
+
+function createAssignment(fields) {
+  const data = loadData();
+  const assignment = { id: newId('asg'), ...normalizeAssignment(fields, Date.now()) };
+  saveData({ ...data, assignments: [...data.assignments, assignment] });
+  return assignment;
+}
+
+function updateAssignment(id, fields) {
+  const data = loadData();
+  const assignments = data.assignments.map(a =>
+    a.id === id ? { ...a, ...normalizeAssignment({ ...a, ...fields }, a.createdAt) } : a);
+  saveData({ ...data, assignments });
+}
+
+function toggleAssignmentDone(id) {
+  const data = loadData();
+  const assignments = data.assignments.map(a => a.id === id ? { ...a, done: !a.done } : a);
+  saveData({ ...data, assignments });
+}
+
+function deleteAssignment(id) {
+  const data = loadData();
+  saveData({ ...data, assignments: data.assignments.filter(a => a.id !== id) });
+}
+
 /* ----------------------------------------------------------------
    2. SM-2 SCHEDULER
    ----------------------------------------------------------------
@@ -935,6 +1115,11 @@ function renderHome() {
   const data = loadData();
   renderBackupNudge();     // must run AFTER loadData, which is what arms the lock
   renderDashboard(data);
+  // Its own line, deliberately OUTSIDE renderDashboard: that function returns early
+  // when there are no decks, so a call placed inside would hide the panel from exactly
+  // the person this feature was designed for — someone who logs a Filosofia test before
+  // creating a Filosofia deck. Pinned by check W5.
+  renderAssignmentsPanel(data);
 }
 
 function renderDashboard(data) {
@@ -4690,7 +4875,11 @@ function onImportFile(event) {
     const current = loadData();
     const hasData = current.decks.length > 0 || current.cards.length > 0;
     const msg = hasData
-      ? `Import ${deckN} deck${deckN === 1 ? '' : 's'} and ${cardN} card${cardN === 1 ? '' : 's'}? This REPLACES your current decks, cards, and history.`
+      // "assignments" added with feature #27: import is the other door into
+      // saveData({force:true}), and it under-reported what it replaces exactly the way
+      // restorePlan did. When a bug is found at one call site, its siblings are the
+      // first place to look — offline lived in 7 places, "Try again" in 4.
+      ? `Import ${deckN} deck${deckN === 1 ? '' : 's'} and ${cardN} card${cardN === 1 ? '' : 's'}? This REPLACES your current decks, cards, assignments, and history.`
       : `Import ${deckN} deck${deckN === 1 ? '' : 's'} and ${cardN} card${cardN === 1 ? '' : 's'}?`;
     if (!confirm(msg)) return;
 
@@ -5317,6 +5506,306 @@ async function initServiceWorker() {
     // registration must not take the app down with it.
     console.warn('Service worker did not register:', e);
   }
+}
+
+/* ── PURE assignments-view ───────────────────────────────────────
+   13. ASSIGNMENTS — view (feature #27, checkpoint 2), pure half.
+
+   Every string the Assignments UI renders is built here, by functions that take
+   their arguments and touch nothing else — no DOM, no localStorage, no clock.
+   The impure renderAssignments() below does nothing but assign innerHTML.
+
+   Why the split: (C) test-assignments-ui.mjs slices this block and asserts the
+   markup directly. Build markup inside a render function and it becomes invisible
+   to the suite — which is how 372 green checks once sat on top of a header
+   rendering `Label | % | %`. Check W6 fails if renderAssignments grows a template
+   literal of its own.
+
+   This block MAY reference `escapeHtml`, `uniqueTags` and the PURE assignments
+   block above (startOfDay, isOverdue, sortAssignments, filterAssignments) — the
+   suite slices all of them out of this same file rather than stubbing them, so
+   the suite cannot drift from the app. It may reference nothing else.
+   ---------------------------------------------------------------- */
+
+const ASG_HOME_MAX = 3;
+const PRIORITY_LABEL = { high: 'High', med: 'Medium', low: 'Low' };
+
+/* A <input type="date"> value, or '' for no due date. */
+function tsToDateInput(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const two = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
+}
+
+/* The inverse, and the one place a timezone bug would hide.
+
+   `new Date('2026-07-31')` parses as UTC midnight. In Lisbon that lands on the right
+   calendar day BY LUCK, so a round-trip test passes with the bug present and a due
+   date silently shifts by a day for anyone further west. Built from parts instead,
+   which is local by construction. Pinned by check T10. */
+function dateInputToTs(str) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str == null ? '' : str).trim());
+  if (!m) return 0;
+  const y = Number(m[1]), mo = Number(m[2]), da = Number(m[3]);
+  const d = new Date(y, mo - 1, da, 0, 0, 0, 0);
+  // Date rolls 2026-02-31 over into March rather than refusing it. A due date the
+  // user did not choose is worse than no due date.
+  if (d.getFullYear() !== y || d.getMonth() !== mo - 1 || d.getDate() !== da) return 0;
+  return d.getTime();
+}
+
+function shortDate(ts) {
+  // Explicit locale, matching describeBackup. renderDashboard passes undefined and is
+  // therefore untestable on this point; a check asserting "7 Aug" under an implicit
+  // locale would pass on this machine and fail on another.
+  return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function formatDueDate(ts, now) {
+  if (!ts) return '';
+  const day = startOfDay(ts);
+  const today = startOfDay(now);
+  if (day < today) return 'Overdue · ' + shortDate(ts);
+  if (day === today) return 'Today';
+  const t = new Date(today);
+  t.setDate(t.getDate() + 1);           // via Date, so a DST boundary cannot skew it
+  if (day === t.getTime()) return 'Tomorrow';
+  return shortDate(ts);
+}
+
+/* Subjects reuse uniqueTags outright: same dedupe, same case-folding, same sort as
+   deck tags, so the two vocabularies can never order differently on screen. */
+function assignmentSubjects(list) {
+  return uniqueTags((list || []).map(a => ({ tag: a.subject })));
+}
+
+/* The datalist merges deck tags AND subjects already typed, so a subject with no deck
+   yet still suggests itself — the "log a Filosofia test before creating a Filosofia
+   deck" case the free-text decision was made for. */
+function subjectOptionsHtml(decks, list) {
+  const merged = uniqueTags([
+    ...(decks || []).map(d => ({ tag: d.tag })),
+    ...(list || []).map(a => ({ tag: a.subject }))
+  ]);
+  return merged.map(s => `<option value="${escapeHtml(s)}"></option>`).join('');
+}
+
+function subjectChipsHtml(subjects, active) {
+  const isAll = !active;
+  const chips = (subjects || []).map((s, i) =>
+    `<button class="tag-chip${active === s ? ' active' : ''}" aria-pressed="${active === s}" ` +
+    `onclick="onAsgSubjectChip(${i})">${escapeHtml(s)}</button>`);
+  return `<button class="tag-chip${isAll ? ' active' : ''}" aria-pressed="${isAll}" ` +
+         `onclick="onAsgSubjectChip(-1)">All</button>` + chips.join('');
+}
+
+/* Absent entirely when nothing is completed: a toggle for an empty set is noise, and
+   every element here has to earn its place. */
+function completedToggleHtml(doneCount, showCompleted) {
+  if (!doneCount) return '';
+  return `<button class="tag-chip${showCompleted ? ' active' : ''}" aria-pressed="${!!showCompleted}" ` +
+         `onclick="onAsgToggleCompleted()">${showCompleted ? 'Hide' : 'Show'} completed (${doneCount})</button>`;
+}
+
+/* Handlers take the RENDER INDEX, never the id. onTagChip documents why: a title is
+   user text, and the browser decodes entities in attributes before the JS runs, so
+   escaping does not protect an inlined value. Pinned by check X28. */
+function assignmentRowHtml(a, index, ctx) {
+  const overdue = isOverdue(a, ctx.now);
+  const due = formatDueDate(a.dueAt, ctx.now);
+  const deck = (ctx.decks || []).find(d => d.id === a.deckId);
+  const name = escapeHtml(a.title || 'Untitled');
+  const meta = [
+    a.subject ? `<span class="asg-subject">${escapeHtml(a.subject)}</span>` : '',
+    `<span class="asg-prio">${PRIORITY_LABEL[a.priority] || PRIORITY_LABEL.med}</span>`,
+    due ? `<span class="asg-due">${escapeHtml(due)}</span>` : '',
+    // A dangling deckId renders nothing rather than a blank chip — the weakSpots
+    // precedent: skip what you cannot name.
+    deck ? `<span class="asg-deck-chip">${escapeHtml(deck.name)}</span>` : ''
+  ].join('');
+
+  return `<div class="asg-row${overdue ? ' overdue' : ''}${a.done ? ' asg-done' : ''}">` +
+    `<button class="asg-check" aria-label="Mark ${name} as ${a.done ? 'not done' : 'done'}" ` +
+      `onclick="onToggleAssignment(${index})">${a.done ? '✓' : ''}</button>` +
+    `<div class="asg-main"><div class="asg-title">${name}</div>` +
+      `<div class="asg-meta">${meta}</div></div>` +
+    `<button class="icon-btn" aria-label="Edit ${name}" onclick="openAssignmentModal(${index})">✎</button>` +
+    `<button class="icon-btn" aria-label="Delete ${name}" onclick="onDeleteAssignment(${index})">✕</button>` +
+  `</div>`;
+}
+
+/* Two different empty states on purpose. Telling someone who has five assignments to
+   "create your first" is a lie, and it hides the fact that a filter is on. */
+function assignmentListHtml(shown, ctx) {
+  const list = shown || [];
+  if (list.length === 0) {
+    if (!ctx.total) {
+      return `<div class="empty">` +
+        `<div class="empty-title">No assignments yet</div>` +
+        `<div class="empty-sub">Track homework, tests and essays next to the decks you study for them.</div>` +
+        `<div class="empty-actions">` +
+          `<button class="btn btn-primary" onclick="openAssignmentModal(-1)">+ New assignment</button>` +
+        `</div></div>`;
+    }
+    return `<p class="filter-empty">Nothing matches this filter.</p>`;
+  }
+  return list.map((a, i) => assignmentRowHtml(a, i, ctx)).join('');
+}
+
+/* Returns '' — not an empty box — when nothing is open. The design note is explicit,
+   and an empty panel on the Home screen is worse than no panel. */
+function assignmentPanelHtml(list, ctx) {
+  const open = filterAssignments(list, {});
+  if (open.length === 0) return '';
+  const next = sortAssignments(open, 'due').slice(0, ASG_HOME_MAX);
+  const rows = next.map(a =>
+    `<div class="asg-panel-row${isOverdue(a, ctx.now) ? ' overdue' : ''}">` +
+      `<span class="asg-panel-title">${escapeHtml(a.title || 'Untitled')}</span>` +
+      `<span class="asg-panel-prio">${PRIORITY_LABEL[a.priority] || PRIORITY_LABEL.med}</span>` +
+      `<span class="asg-panel-due">${escapeHtml(formatDueDate(a.dueAt, ctx.now))}</span>` +
+    `</div>`).join('');
+  return `<div class="asg-panel-head"><h2>Assignments</h2>` +
+    `<button class="btn btn-outline" onclick="goAssignments()">See all</button></div>${rows}`;
+}
+/* ── END PURE assignments-view */
+
+/* ── 13-impure ───────────────────────────────────────────────────
+   The thin shell. Every function here reads state, calls a pure builder, and
+   assigns the result. No markup is built in this block — check W6 fails if
+   renderAssignments grows a template literal, because markup written here would
+   be invisible to (C) test-assignments-ui.mjs.
+
+   Transient view state, mirroring activeTag/renderedTags on the decks screen:
+   never persisted, so a refresh starts unfiltered. */
+
+let asgSort = 'due';
+let asgSubject = null;          // selected subject chip, or null = All
+let asgShowCompleted = false;
+let renderedSubjects = [];      // subjects as last rendered; chips click by index
+let renderedAssignments = [];   // rows as last rendered; handlers dispatch by index
+let editingAssignmentId = null;
+
+function goAssignments() {
+  setCrumb('');
+  setActiveTab('assignments');
+  renderAssignments();
+  showScreen('assignments');
+}
+
+function renderAssignments() {
+  const data = loadData();
+  const all = data.assignments;
+  const doneCount = all.filter(a => a.done).length;
+
+  renderedSubjects = assignmentSubjects(asgShowCompleted ? all : all.filter(a => !a.done));
+  // A chip for a subject that no longer exists would filter to nothing forever.
+  if (asgSubject && !renderedSubjects.some(s => s === asgSubject)) asgSubject = null;
+
+  const shown = sortAssignments(
+    filterAssignments(all, { subject: asgSubject, showCompleted: asgShowCompleted }),
+    asgSort);
+  // Assigned BEFORE the markup is built, so the indices the handlers receive
+  // always match the rows the user is looking at.
+  renderedAssignments = shown;
+
+  const ctx = { now: Date.now(), decks: data.decks, total: all.length };
+  document.getElementById('asg-controls').innerHTML =
+    subjectChipsHtml(renderedSubjects, asgSubject) +
+    completedToggleHtml(doneCount, asgShowCompleted);
+  document.getElementById('assignments-body').innerHTML = assignmentListHtml(shown, ctx);
+}
+
+/* The Home panel. Hidden entirely — not an empty box — when nothing is open. */
+function renderAssignmentsPanel(data) {
+  const el = document.getElementById('dash-assignments');
+  if (!el) return;
+  const html = assignmentPanelHtml(data.assignments, { now: Date.now(), decks: data.decks });
+  el.innerHTML = html;
+  el.style.display = html ? '' : 'none';
+}
+
+function onAsgSortChange() {
+  asgSort = document.getElementById('asg-sort').value;
+  renderAssignments();
+}
+
+function onAsgSubjectChip(index) {
+  if (index === -1) asgSubject = null;
+  else asgSubject = (asgSubject === renderedSubjects[index]) ? null : renderedSubjects[index];
+  renderAssignments();
+}
+
+function onAsgToggleCompleted() {
+  asgShowCompleted = !asgShowCompleted;
+  renderAssignments();
+}
+
+/* index -1 = create. Anything else edits the row at that render index. */
+function openAssignmentModal(index) {
+  const data = loadData();
+  const editing = index >= 0 ? renderedAssignments[index] : null;
+  editingAssignmentId = editing ? editing.id : null;
+
+  document.getElementById('asg-modal-title').textContent =
+    editing ? 'Edit assignment' : 'New assignment';
+  document.getElementById('asg-save-btn').textContent =
+    editing ? 'Save changes' : 'Create assignment';
+  document.getElementById('asg-title').value = editing ? editing.title : '';
+  document.getElementById('asg-subject').value = editing ? editing.subject : '';
+  document.getElementById('asg-due').value = editing ? tsToDateInput(editing.dueAt) : '';
+  document.getElementById('asg-priority').value = editing ? editing.priority : 'med';
+  document.getElementById('asg-error').textContent = '';
+
+  document.getElementById('asg-subjects').innerHTML =
+    subjectOptionsHtml(data.decks, data.assignments);
+  document.getElementById('asg-deck').innerHTML =
+    '<option value="">None</option>' +
+    data.decks.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('');
+  document.getElementById('asg-deck').value = editing ? editing.deckId : '';
+
+  document.getElementById('assignment-modal').classList.add('open');
+  document.getElementById('asg-title').focus();
+}
+
+function closeAssignmentModal() {
+  document.getElementById('assignment-modal').classList.remove('open');
+  editingAssignmentId = null;
+}
+
+function onSaveAssignment() {
+  const fields = {
+    title: document.getElementById('asg-title').value,
+    subject: document.getElementById('asg-subject').value,
+    dueAt: dateInputToTs(document.getElementById('asg-due').value),
+    priority: document.getElementById('asg-priority').value,
+    deckId: document.getElementById('asg-deck').value
+  };
+  if (!fields.title.trim()) {
+    document.getElementById('asg-error').textContent = 'Give the assignment a title.';
+    return;
+  }
+  if (editingAssignmentId) updateAssignment(editingAssignmentId, fields);
+  else createAssignment(fields);
+  closeAssignmentModal();
+  renderAssignments();
+}
+
+/* Marking done is reversible and never destroys the record, so it asks nothing.
+   Deleting does. */
+function onToggleAssignment(index) {
+  const a = renderedAssignments[index];
+  if (!a) return;
+  toggleAssignmentDone(a.id);
+  renderAssignments();
+}
+
+function onDeleteAssignment(index) {
+  const a = renderedAssignments[index];
+  if (!a) return;
+  if (!confirm(`Delete "${a.title}"? This cannot be undone.`)) return;
+  deleteAssignment(a.id);
+  renderAssignments();
 }
 
 goHome();

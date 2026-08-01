@@ -31,6 +31,7 @@
       <button class="nav-tab" id="tab-decks" onclick="goDecks()">Decks</button>
       <button class="nav-tab" id="tab-generate" onclick="goGenerate()">Generate</button>
       <button class="nav-tab" id="tab-stats" onclick="goStats()">Progress</button>
+      <button class="nav-tab" id="tab-assignments" onclick="goAssignments()">Assignments</button>
     </div>
     <div class="nav-right">
       <span class="nav-crumb" id="nav-crumb"></span>
@@ -91,6 +92,12 @@
       </div>
     </div>
 
+    <!-- Assignments panel (feature #27). Rendered OUTSIDE renderDashboard, which
+         returns early with zero decks — this panel must still appear for someone who
+         logged a Filosofia test before creating a Filosofia deck. Placed above
+         #home-empty so that case reads correctly. Empty string = no panel at all. -->
+    <div class="asg-panel" id="dash-assignments" style="display:none"></div>
+
     <div id="home-empty"></div>
 
     <div class="activity-panel" id="dash-activity" style="display:none">
@@ -137,6 +144,29 @@
       </div>
     </div>
     <input type="file" id="import-file" accept="application/json,.json" style="display:none" onchange="onImportFile(event)">
+  </section>
+
+  <!-- ============ ASSIGNMENTS (feature #27) ============ -->
+  <section id="screen-assignments" class="screen">
+    <div class="page-head">
+      <div>
+        <div class="eyebrow">School</div>
+        <h1 class="page">Assignments</h1>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <!-- Static, outside #assignments-body, so a re-render never steals focus or
+             resets the choice mid-interaction — same reason as #deck-search-wrap. -->
+        <label class="asg-sort-label" for="asg-sort">Sort by</label>
+        <select id="asg-sort" onchange="onAsgSortChange()">
+          <option value="due">Due date</option>
+          <option value="priority">Priority</option>
+        </select>
+        <button class="btn btn-primary" onclick="openAssignmentModal(-1)">+ New assignment</button>
+      </div>
+    </div>
+
+    <div id="asg-controls"></div>
+    <div id="assignments-body"></div>
   </section>
 
   <!-- ============ DECK VIEW ============ -->
@@ -552,6 +582,46 @@
 </div>
 
 <!-- ============ API KEY MODAL ============ -->
+<div class="modal-backdrop" id="assignment-modal" onclick="if(event.target===this)closeAssignmentModal()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="asg-modal-title">
+    <h2 id="asg-modal-title">New assignment</h2>
+    <div class="modal-sub">Homework, a test, an essay — anything with a deadline.</div>
+    <div class="field">
+      <label for="asg-title">Title</label>
+      <input id="asg-title" type="text" placeholder="e.g. Biology test — chapter 4" autocomplete="off">
+    </div>
+    <div class="field">
+      <!-- Free text with suggestions, not a closed list: a Filosofia test has to be
+           loggable before a Filosofia deck exists. Options come from deck tags AND
+           subjects already used. -->
+      <label for="asg-subject">Subject — optional</label>
+      <input id="asg-subject" type="text" list="asg-subjects" placeholder="e.g. Biology" autocomplete="off">
+      <datalist id="asg-subjects"></datalist>
+    </div>
+    <div class="field">
+      <label for="asg-due">Due date — optional</label>
+      <input id="asg-due" type="date">
+    </div>
+    <div class="field">
+      <label for="asg-priority">Priority</label>
+      <select id="asg-priority">
+        <option value="high">High</option>
+        <option value="med" selected>Medium</option>
+        <option value="low">Low</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="asg-deck">Study deck — optional</label>
+      <select id="asg-deck"></select>
+    </div>
+    <div class="form-error" id="asg-error" style="margin-bottom:8px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeAssignmentModal()">Cancel</button>
+      <button class="btn btn-primary" id="asg-save-btn" onclick="onSaveAssignment()">Create assignment</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="restore-modal" onclick="if(event.target===this)closeRestoreModal()">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="restore-modal-title">
     <h2 id="restore-modal-title">Restore from server</h2>

@@ -454,7 +454,56 @@ h1.page{font-family:var(--font-display);font-weight:300;font-size:36px;letter-sp
   *,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}
   .spinner{animation:spin 700ms linear infinite!important}
 }
+/* ── Assignments (feature #27) ──────────────────────────────────
+   No colour anywhere in here, deliberately. Overdue is carried by a left rule, a
+   heavier weight and the WORD "Overdue" in the markup. This app has no colour-alarm
+   vocabulary and homework is not where to invent one — it also satisfies WCAG 1.4.1
+   (use of colour) for free. Check L15 fails if a hex or an --error token appears. */
+.asg-panel{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-md);padding:18px 20px;margin-bottom:22px}
+.asg-panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.asg-panel-head h2{font-family:var(--font-display);font-weight:500;font-size:17px;letter-spacing:-0.01em}
+.asg-panel-row{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:baseline;padding:8px 0;border-top:1px solid var(--border)}
+.asg-panel-row.overdue .asg-panel-due{font-weight:600}
+.asg-panel-title{font-size:14px;overflow-wrap:anywhere}
+.asg-panel-prio,.asg-panel-due{font-size:12px;color:var(--ink-2);white-space:nowrap}
+
+.asg-row{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#fff;border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:8px}
+.asg-row.overdue{border-left:2px solid var(--ink)}
+.asg-row.overdue .asg-due{font-weight:600;color:var(--ink)}
+.asg-row.asg-done .asg-title{text-decoration:line-through;color:var(--ink-3)}
+.asg-check{width:22px;height:22px;flex:none;margin-top:1px;border:1px solid var(--border);border-radius:var(--r-sm);background:#fff;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center}
+.asg-check:hover{border-color:var(--ink-2)}
+.asg-main{flex:1;min-width:0}
+.asg-title{font-size:15px;overflow-wrap:anywhere}
+.asg-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:12px;color:var(--ink-2)}
+.asg-deck-chip{padding:1px 8px;background:var(--surface-2);border-radius:var(--r-full)}
+.asg-sort-label{font-size:13px;color:var(--ink-2)}
+.filter-empty{padding:22px 4px;font-size:14px;color:var(--ink-2)}
+
+/* The chip had no focus style at all. New chips inherit that gap and so does the
+   decks screen, so it is fixed here rather than duplicated. */
+.tag-chip:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
 @media (max-width:560px){
+  /* The nav ALREADY overflowed at 390px with four tabs — logo plus tabs exceed the
+     usable width and .nav-tabs had neither wrap nor scroll, so the settings gear was
+     pushed off-screen. Recall is an installed PWA on a phone; a fifth tab makes it
+     worse. Three declarations, no change to the visual language. */
+  /* The fifth tab (feature #27) pushed the nav past the viewport. MEASURED in a real
+     browser at a 500px viewport, with these three rules removed:
+         scrollWidth 580 vs clientWidth 500 — OVERFLOW
+         .nav-right (the settings gear) right=580, i.e. 80px off-screen
+     With them: no overflow, and the tab strip scrolls instead (358 visible of 407).
+     Recall is an installed PWA on a phone, so a nav that hides its own settings button
+     is not shippable.
+     overflow-x:auto is what does the work: per spec a scroll container's automatic
+     minimum size is already 0, so no min-width declaration is needed here — that was
+     tried and measured to change nothing. */
+  .nav-logo-name{display:none}
+  .nav-tabs{overflow-x:auto;scrollbar-width:none}
+  .nav-tabs::-webkit-scrollbar{display:none}
+  .nav-tab{white-space:nowrap}
+  .asg-panel-row{grid-template-columns:1fr auto}
   .card-row{grid-template-columns:1fr;gap:12px}
   h1.page{font-size:30px}
   .rating-grid{grid-template-columns:repeat(2,1fr)}
