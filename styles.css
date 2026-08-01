@@ -200,7 +200,16 @@ h1.page{font-family:var(--font-display);font-weight:300;font-size:36px;letter-sp
   padding:30px 32px;display:flex;flex-direction:column;justify-content:space-between;gap:24px}
 .due-label{font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:14px}
 .due-num{display:flex;align-items:baseline;gap:14px}
-.due-big{font-family:var(--font-display);font-weight:200;font-size:76px;line-height:0.85;letter-spacing:-0.03em}
+/* letter-spacing was -0.03em and the DIGITS COLLIDED. DM Sans at weight 200 has very
+   round, wide-bowled numerals; at 76-88px, -0.03em pulls them into each other. Diogo
+   saw it as "65" with the 6 inside the 5 — and 88 and 05 did the same. It is a glyph-ink
+   collision INSIDE one element, so neither an element-rect overlap detector (8
+   configurations, 0 hits) nor a Range measurement of the advance boxes (0.02px) could
+   see it. Only rendering the numerals at 2x and looking found it.
+   +0.02em chosen by rendering -0.03 / 0 / +0.01 / +0.02 / +0.03 side by side: it is the
+   first value where 65, 88 and 05 all separate cleanly without looking tracked-out.
+   tabular-nums keeps the counter from jittering as the number changes. */
+.due-big{font-family:var(--font-display);font-weight:200;font-size:76px;line-height:0.85;letter-spacing:0.02em;font-variant-numeric:tabular-nums}
 .due-unit{font-size:17px;color:var(--ink-2)}
 .due-sub{color:var(--ink-2);font-size:14px;margin-top:14px;line-height:1.5}
 .due-actions{display:flex;gap:10px;flex-wrap:wrap}
