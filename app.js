@@ -1086,6 +1086,81 @@ function searchCards(cards, decks, query) {
   return hits;
 }
 
+/* Global assignment search: substring on title or subject, accent-insensitive, capped.
+   Mirrors searchCards deliberately — same shape in, same shape out, so globalSearch
+   can treat the three the same way. Done assignments ARE included: "when was that
+   thing due" is a real question after it is ticked off, and the row carries `done`
+   so the UI can show it greyed rather than hide it. */
+function searchAssignments(assignments, query) {
+  const q = normalizeQuery(query);
+  if (!q) return [];
+  const hits = [];
+  for (const a of assignments) {
+    if (hits.length >= SEARCH_RESULTS_MAX) break;
+    // foldText coerces null/undefined to '', so a half-formed row from an old
+    // backup is skipped rather than throwing and taking the whole overlay down.
+    if (!foldText(a.title).includes(q) && !foldText(a.subject).includes(q)) continue;
+    hits.push({ id: a.id, title: a.title, subject: a.subject, dueAt: a.dueAt, done: a.done === true });
+  }
+  return hits;
+}
+
+/* One query over the whole library, for the ⌘K overlay (feature #28).
+
+   THE EMPTY-QUERY GUARD IS THE POINT. filterDecks() is a FILTER: given no query it
+   returns every deck, which is correct for the Decks screen and catastrophic for a
+   search box — opening ⌘K and typing nothing would paint the entire library as
+   "results". So this returns early before filterDecks is ever reached.
+
+   Missing keys degrade to empty lists rather than throwing: saved data from before
+   #27 has no `assignments` at all. */
+function globalSearch(library, query) {
+  const q = normalizeQuery(query);
+  if (!q) return { decks: [], cards: [], assignments: [], total: 0 };
+
+  const lib   = library || {};
+  const decks = lib.decks || [];
+  const deckHits       = filterDecks(decks, { tag: null, query }).slice(0, SEARCH_RESULTS_MAX);
+  const cardHits       = searchCards(lib.cards || [], decks, query);
+  const assignmentHits = searchAssignments(lib.assignments || [], query);
+
+  return {
+    decks: deckHits,
+    cards: cardHits,
+    assignments: assignmentHits,
+    // One number so the UI can say "no matches" once instead of three times.
+    total: deckHits.length + cardHits.length + assignmentHits.length
+  };
+}
+
+/* Flatten the three groups into the exact order the overlay paints them.
+
+   Why this is a function and not a loop inside the renderer: the keyboard walks a
+   FLAT list while the screen shows three headed groups. If those two ever disagree
+   about order, ↓↓↓ Enter opens the wrong thing — and a screenshot of it looks
+   perfect. One ordering, one place, checked by C1. */
+function searchRows(results) {
+  const r = results || {};
+  const rows = [];
+  for (const d of r.decks || [])
+    rows.push({ type: 'deck', id: d.id, deckId: d.id, label: d.name || '', sub: d.tag || 'Deck' });
+  for (const c of r.cards || [])
+    rows.push({ type: 'card', id: c.id, deckId: c.deckId, label: c.front || '', sub: c.deckName || '' });
+  for (const a of r.assignments || [])
+    rows.push({ type: 'assignment', id: a.id, deckId: '', label: a.title || '', sub: a.subject || 'Assignment' });
+  return rows;
+}
+
+/* What to show instead of rows. An untouched box must NOT say "no matches" — that
+   accuses you of failing before you have typed anything. */
+function searchEmptyState(query, total) {
+  if (!normalizeQuery(query)) {
+    return { show: true, text: 'Type to search your decks, cards and assignments.' };
+  }
+  if (!total) return { show: true, text: 'No matches for “' + query + '”.' };
+  return { show: false, text: '' };
+}
+
 function goDecks() {
   setCrumb('');
   setActiveTab('decks');
@@ -1417,7 +1492,7 @@ function renderCards() {
     </div>`;
     }
     return `
-    <div class="card-row">
+    <div class="card-row" data-card-id="${c.id}">
       <div><div class="lbl">Front</div><div class="front">${escapeHtml(c.front)}</div></div>
       <div><div class="lbl">Back</div><div class="back">${escapeHtml(c.back)}</div></div>
       <div class="card-row-actions">
@@ -5407,6 +5482,152 @@ document.getElementById('deck-modal').addEventListener('keydown', e => {
 document.getElementById('key-modal').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); onSaveKey(); }
   if (e.key === 'Escape') closeKeyModal();
+});
+
+/* ────────────────────────────────────────────────────────────────
+   GLOBAL SEARCH (⌘K, feature #28) — impure half.
+
+   The decisions all live in the pure block up in section 4A (globalSearch,
+   searchRows, searchEmptyState), checked by "04 System/(C) test-search.mjs".
+   Everything below is DOM: opening, painting, arrowing, navigating.
+   ---------------------------------------------------------------- */
+
+let searchOpen = false;
+let searchActiveIndex = 0;
+let searchRowsCache = [];
+let searchReturnFocus = null;
+
+// The pill claims a shortcut; on Windows/Linux the claim would be wrong. Cheap to
+// get right, and a keyboard hint nobody can use is worse than none.
+(function labelSearchShortcut() {
+  const key = document.getElementById('search-pill-key');
+  if (key && !/Mac|iPhone|iPad/.test(navigator.platform || '')) key.textContent = 'Ctrl K';
+})();
+
+function openSearch() {
+  if (searchOpen) return;
+  searchOpen = true;
+  // Remember where focus was. Without this, closing the overlay drops a keyboard
+  // user back at the top of the document and they lose their place completely.
+  searchReturnFocus = document.activeElement;
+  document.getElementById('search-overlay').hidden = false;
+  const input = document.getElementById('search-input');
+  input.value = '';
+  input.focus();
+  onSearchInput();
+}
+
+function closeSearch() {
+  if (!searchOpen) return;
+  searchOpen = false;
+  document.getElementById('search-overlay').hidden = true;
+  searchRowsCache = [];
+  searchActiveIndex = 0;
+  if (searchReturnFocus && document.contains(searchReturnFocus)) searchReturnFocus.focus();
+  searchReturnFocus = null;
+}
+
+function onSearchInput() {
+  const query = document.getElementById('search-input').value;
+  const results = globalSearch(loadData(), query);
+  searchRowsCache = searchRows(results);
+  searchActiveIndex = 0;
+  renderSearchResults(results, query);
+}
+
+/** Move the highlight, wrapping at both ends. */
+function moveSearchActive(delta) {
+  if (!searchRowsCache.length) return;
+  const n = searchRowsCache.length;
+  searchActiveIndex = ((searchActiveIndex + delta) % n + n) % n;
+  paintSearchActive();
+}
+
+function paintSearchActive() {
+  const rows = document.querySelectorAll('#search-results .search-row');
+  rows.forEach((el, i) => {
+    const on = i === searchActiveIndex;
+    el.classList.toggle('active', on);
+    el.setAttribute('aria-selected', on ? 'true' : 'false');
+    if (on) {
+      el.scrollIntoView({ block: 'nearest' });
+      // Tells a screen reader which option is current without moving real focus
+      // out of the input, which would break typing.
+      document.getElementById('search-input').setAttribute('aria-activedescendant', el.id);
+    }
+  });
+}
+
+const SEARCH_GROUP_LABELS = { deck: 'Decks', card: 'Cards', assignment: 'Assignments' };
+
+function renderSearchResults(results, query) {
+  const box = document.getElementById('search-results');
+  const empty = searchEmptyState(query, results.total);
+  if (empty.show) {
+    box.innerHTML = `<div class="search-empty">${escapeHtml(empty.text)}</div>`;
+    return;
+  }
+
+  // Walk the SAME flat list the keyboard uses, inserting a heading whenever the
+  // type changes. Deriving both from one array is what keeps ↓↓↓ Enter honest.
+  let html = '';
+  let lastType = null;
+  searchRowsCache.forEach((row, i) => {
+    if (row.type !== lastType) {
+      html += `<div class="search-group" role="presentation">${SEARCH_GROUP_LABELS[row.type] || ''}</div>`;
+      lastType = row.type;
+    }
+    html += `<div class="search-row${i === searchActiveIndex ? ' active' : ''}" role="option"
+                  id="search-row-${i}" aria-selected="${i === searchActiveIndex}"
+                  onclick="activateSearchRow(${i})" onmousemove="setSearchActive(${i})">
+      <span class="search-row-label">${escapeHtml(row.label)}</span>
+      <span class="search-row-sub">${escapeHtml(row.sub)}</span>
+    </div>`;
+  });
+  box.innerHTML = html;
+  paintSearchActive();
+}
+
+function setSearchActive(i) {
+  if (i === searchActiveIndex) return;      // avoid repainting on every mouse pixel
+  searchActiveIndex = i;
+  paintSearchActive();
+}
+
+/** Open whatever the row points at. Closes first so focus lands on the new screen. */
+function activateSearchRow(i) {
+  const row = searchRowsCache[i];
+  if (!row) return;
+  closeSearch();
+  if (row.type === 'assignment') { goAssignments(); return; }
+  // Deck and card both land on the deck. A card additionally gets highlighted, so
+  // you can see WHICH card matched instead of hunting a long list yourself.
+  goDeck(row.deckId);
+  if (row.type === 'card') highlightCard(row.id);
+}
+
+/** Scroll a card row into view and flash it. Purely a way of saying "this one". */
+function highlightCard(cardId) {
+  const el = document.querySelector(`.card-row[data-card-id="${cardId}"]`);
+  if (!el) return;
+  el.scrollIntoView({ block: 'center' });
+  el.classList.add('card-row-found');
+  setTimeout(() => el.classList.remove('card-row-found'), 2000);
+}
+
+document.addEventListener('keydown', e => {
+  // ⌘K on macOS, Ctrl+K elsewhere. Works from every screen because it is bound to
+  // the document, not to any one section.
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    searchOpen ? closeSearch() : openSearch();
+    return;
+  }
+  if (!searchOpen) return;
+  if (e.key === 'Escape')    { e.preventDefault(); closeSearch(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); moveSearchActive(1); return; }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); moveSearchActive(-1); return; }
+  if (e.key === 'Enter')     { e.preventDefault(); activateSearchRow(searchActiveIndex); }
 });
 
 /* ── PWA — install + offline (feature #26) ────────────────────────
