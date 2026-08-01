@@ -5635,6 +5635,19 @@ function assignmentRowHtml(a, index, ctx) {
   `</div>`;
 }
 
+/* The whole filter row, wrapped in the SAME .tag-row the decks screen uses
+   (display:flex, gap:6px, flex-wrap:wrap). Returning bare buttons into a container
+   with no styling of its own left every chip touching its neighbour — "All" glued to
+   "Biologia" — while the decks screen looked correct, because that one has the
+   wrapper. Reusing the class rather than adding a second one keeps the two chip rows
+   from drifting apart. Pinned by check L42. */
+function assignmentControlsHtml(subjects, active, doneCount, showCompleted) {
+  return `<div class="tag-row">` +
+    subjectChipsHtml(subjects, active) +
+    completedToggleHtml(doneCount, showCompleted) +
+  `</div>`;
+}
+
 /* Two different empty states on purpose. Telling someone who has five assignments to
    "create your first" is a lie, and it hides the fact that a filter is on. */
 function assignmentListHtml(shown, ctx) {
@@ -5711,8 +5724,7 @@ function renderAssignments() {
 
   const ctx = { now: Date.now(), decks: data.decks, total: all.length };
   document.getElementById('asg-controls').innerHTML =
-    subjectChipsHtml(renderedSubjects, asgSubject) +
-    completedToggleHtml(doneCount, asgShowCompleted);
+    assignmentControlsHtml(renderedSubjects, asgSubject, doneCount, asgShowCompleted);
   document.getElementById('assignments-body').innerHTML = assignmentListHtml(shown, ctx);
 }
 
