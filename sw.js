@@ -4,7 +4,7 @@
 // Keeps its exact filename (no "(C)" prefix) because a service worker's PATH defines
 // its scope — it must sit at the app root. Tool-imposed name, per the vault CLAUDE.md.
 
-const BUILD_ID = '7833946f6de3';
+const BUILD_ID = 'ba22ebeb145b';
 const CACHE    = 'recall-' + BUILD_ID;
 const SHELL    = new URL('./index.html', self.location).href;
 
@@ -250,5 +250,17 @@ self.addEventListener('fetch', event => {
 self.addEventListener('message', event => {
   if (event.data && event.data.type === 'build-id' && event.ports[0]) {
     event.ports[0].postMessage({ buildId: BUILD_ID, expected: PRECACHE.length });
+  }
+
+  // The end of the wait. install deliberately does NOT call skipWaiting(), because
+  // activating on its own would swap this worker in under the old app.js, possibly
+  // mid-review-card. So the decision is handed to the person instead: the app shows
+  // "New version ready — Update", and only a click gets here.
+  //
+  // Without this, a waiting worker could only activate once EVERY client was gone —
+  // and closing the tab is not enough when the installed app is also open. On
+  // 2026-08-01 that cost four full quits in one session.
+  if (event.data && event.data.type === 'skip-waiting') {
+    self.skipWaiting();
   }
 });

@@ -661,6 +661,15 @@
 
 <div id="toast"></div>
 
+<!-- The update handoff (2026-08-01). NOT a toast: a toast disappears after 1.6s and
+     has nothing to click, which is exactly the state that left ⌘Q as the only way to
+     pick up a new build. This stays until it is acted on or dismissed. -->
+<div id="update-bar" hidden>
+  <span id="update-bar-text"></span>
+  <button class="btn btn-primary" id="update-bar-action" onclick="onTakeUpdate()"></button>
+  <button class="btn btn-ghost" onclick="dismissUpdateBar()" aria-label="Dismiss">Later</button>
+</div>
+
 <!-- Which Kokoro clips exist on disk, written by 04 System/(C) kokoro-build-audio.py.
      Loaded as a <script> and not fetched on purpose: fetch() is blocked on file://
      but <script> and <audio> are not. Missing file is fine and simply means no

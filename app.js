@@ -5446,10 +5446,33 @@ function cacheStatus(cached, expected) {
   return { ready: false, text: 'Offline: only ' + cached + '/' + expected + ' files ready' };
 }
 
+/**
+ * Whether to offer the "New version ready" button, given a waiting worker.
+ *
+ * This is the piece #26 was missing, and it is NOT the same question updateNotice()
+ * answers. updateNotice() reports which build is running versus which one ran last
+ * time — it can only speak AFTER the swap already happened. This one speaks BEFORE:
+ * a new worker has downloaded and is stuck in "waiting", and nothing but an explicit
+ * click will ever let it through.
+ *
+ * `isControlled` false means no worker is serving this page yet — a first install,
+ * not an update. Same rule as updateNotice(): never announce an update to someone
+ * who has never run an older build.
+ *
+ * It carries an ACTION, not just text. A notice with nothing to click is what the
+ * app already had, and it left ⌘Q as the only way through.
+ */
+function updatePrompt(hasWaiting, isControlled) {
+  if (!hasWaiting)   return { show: false, text: '', action: '' };
+  if (!isControlled) return { show: false, text: '', action: '' };
+  return { show: true, text: 'New version ready', action: 'Update' };
+}
+
 /* ── END PURE pwa ── */
 
 let currentBuildId = null;
 let expectedCacheEntries = 0;
+let reloadingForUpdate = false;
 
 /** Ask the worker which build it is, and how many files it expects to have cached. */
 function askBuildId(worker) {
@@ -5477,14 +5500,77 @@ async function countCachedEntries() {
   }
 }
 
+/** The waiting worker we are offering to activate. Null when there is nothing to take. */
+let pendingWorker = null;
+
+/** Show or hide the update bar from a pure updatePrompt() decision. */
+function renderUpdateBar(prompt) {
+  const bar = document.getElementById('update-bar');
+  if (!bar) return;
+  bar.hidden = !prompt.show;
+  if (!prompt.show) return;
+  document.getElementById('update-bar-text').textContent = prompt.text;
+  document.getElementById('update-bar-action').textContent = prompt.action;
+}
+
+function dismissUpdateBar() {
+  const bar = document.getElementById('update-bar');
+  if (bar) bar.hidden = true;
+}
+
+/**
+ * Take the waiting build. Tells the worker to stop waiting; the reload happens in the
+ * controllerchange listener below, once the new worker is actually in charge — not here,
+ * because reloading first would just reload the OLD code.
+ */
+function onTakeUpdate() {
+  if (!pendingWorker) return dismissUpdateBar();
+  pendingWorker.postMessage({ type: 'skip-waiting' });
+  document.getElementById('update-bar-action').textContent = 'Updating…';
+}
+
+/** Offer the update if this worker is genuinely waiting on a controlled page. */
+function offerUpdate(worker) {
+  if (!worker) return;
+  pendingWorker = worker;
+  renderUpdateBar(updatePrompt(true, !!navigator.serviceWorker.controller));
+}
+
 async function initServiceWorker() {
   // Registration needs a secure origin. On the file:// backup copy it simply does not
   // run, and everything else in the app works exactly as before.
   if (!('serviceWorker' in navigator)) return;
 
+  // The swap is only real once the new worker controls the page, so the reload waits
+  // for that event rather than for the click. The guard is not optional: Chrome can
+  // fire controllerchange again after the reload, and the page would reload forever.
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloadingForUpdate) return;
+    reloadingForUpdate = true;
+    location.reload();
+  });
+
   try {
     await navigator.serviceWorker.register('sw.js');
     const reg = await navigator.serviceWorker.ready;
+
+    // Two separate ways an update appears, and #26 watched for neither.
+    // 1. Already waiting — it finished installing during an earlier visit and has been
+    //    stuck ever since, which is precisely the four-⌘Q case from 2026-08-01.
+    if (reg.waiting) offerUpdate(reg.waiting);
+
+    // 2. It installs while this page is open. updatefound fires, and the new worker
+    //    reaches 'installed'. A controller already present means it went to waiting
+    //    rather than straight to active, so there IS something to offer.
+    reg.addEventListener('updatefound', () => {
+      const incoming = reg.installing;
+      if (!incoming) return;
+      incoming.addEventListener('statechange', () => {
+        if (incoming.state === 'installed' && navigator.serviceWorker.controller) {
+          offerUpdate(incoming);
+        }
+      });
+    });
 
     // reg.active is the worker actually SERVING this page. If an update is downloaded
     // but still waiting, that is deliberately the old one — reporting the waiting

@@ -465,6 +465,26 @@ h1.page{font-family:var(--font-display);font-weight:300;font-size:36px;letter-sp
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);z-index:60;background:var(--ink);color:var(--on-inverse);padding:11px 18px;border-radius:var(--r);font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:opacity 200ms,transform 200ms;max-width:90vw;text-align:center}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
+/* Update handoff bar (2026-08-01). Sits above the toast and, unlike it, persists and
+   is clickable — a self-dismissing message is what made ⌘Q the only way to take a
+   new build. [hidden] needs the !important because the flex display would win. */
+/* Anchored TOP-RIGHT, not bottom-centre. A bottom bar covered the "Show answer" button
+   at 900x600 — the primary study action, hidden behind a version notice. The toast can
+   live at the bottom because it clears itself in 1.6s; this one persists until acted on,
+   so it has to sit where nothing is ever clicked. Caught by screenshotting the review
+   screen at a short viewport, and pinned by L14/L15 in (C) live-update-check.mjs. */
+#update-bar{position:fixed;top:72px;right:20px;z-index:70;
+  display:flex;align-items:center;gap:10px;background:var(--ink);color:var(--on-inverse);
+  padding:10px 12px 10px 18px;border-radius:var(--r);font-size:13px;font-weight:500;
+  max-width:min(92vw,420px);box-shadow:0 6px 24px rgba(0,0,0,0.18)}
+#update-bar[hidden]{display:none !important}
+/* Inverted: btn-primary is black on black inside this bar, so the main action read as
+   a plain label with no edge. Caught by screenshotting it, not by any check. */
+#update-bar .btn-primary{background:var(--on-inverse);color:var(--ink);border-color:var(--on-inverse)}
+#update-bar .btn-primary:hover{background:var(--bg);border-color:var(--bg)}
+#update-bar .btn-ghost{color:var(--on-inverse);opacity:0.7}
+#update-bar .btn-ghost:hover{color:var(--on-inverse);opacity:1}
+
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}
   .spinner{animation:spin 700ms linear infinite!important}
