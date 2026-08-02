@@ -48,10 +48,34 @@ function newSrs() {
 const BACKUP_STALE_DAYS = 7;
 const MS_PER_DAY = 86400000;
 
+/* ── Gamification data shape (feature #32) ──
+   Lives HERE, in the persistence section, and not in the gamification block further
+   down. loadData() calls both, and (C) test-backup / test-assignments / test-migration
+   all lift THIS region out and evaluate it standalone — a reference to anything
+   outside it throws a ReferenceError that takes the whole slice down and fake-fails
+   every check in those suites. Found exactly that way on 2026-08-02. */
+function emptyGamification() {
+  return { freezes: 0, frozenDays: [], badges: [], earnedAt: 0 };
+}
+
+/* Every save before this feature has no `gamification` key at all, and an imported
+   backup can carry anything. Degrade field by field rather than trusting the shape —
+   the Progress screen reads this on every render. */
+function normalizeGamification(g) {
+  const src = (g && typeof g === 'object') ? g : {};
+  const num = v => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
+  return {
+    freezes: num(src.freezes),
+    frozenDays: Array.isArray(src.frozenDays) ? src.frozenDays.filter(d => typeof d === 'string') : [],
+    badges: Array.isArray(src.badges) ? src.badges.filter(b => typeof b === 'string') : [],
+    earnedAt: num(src.earnedAt)
+  };
+}
+
 function parseSavedData(raw) {
   // No key at all = a genuinely new install. Empty, but not a fault.
   if (raw === null || raw === undefined || raw === '') {
-    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [] } };
+    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [], gamification: null } };
   }
 
   let parsed;
@@ -77,7 +101,14 @@ function parseSavedData(raw) {
       // unreadable. Anything that is not an array degrades to [] rather than becoming
       // a `wrong-shape` refusal, because a refusal here arms the #19 write lock
       // against a library that is otherwise perfectly good.
-      assignments: Array.isArray(parsed.assignments) ? parsed.assignments : []
+      assignments: Array.isArray(parsed.assignments) ? parsed.assignments : [],
+      // `gamification` (feature #32) is the newest field and follows the same rule as
+      // assignments: anything unusable degrades to null and is rebuilt by
+      // normalizeGamification in loadData. It must NEVER make an older save
+      // `wrong-shape`, because that refusal arms the #19 write lock against a library
+      // that is otherwise perfectly fine.
+      gamification: (parsed.gamification && typeof parsed.gamification === 'object')
+        ? parsed.gamification : null
     }
   };
 }
@@ -448,7 +479,7 @@ function loadData() {
     dataReadFailReason = result.reason;
     console.error('Recall could not read your saved data (' + result.reason +
                   '). Nothing has been changed. Writing is blocked until this is resolved.');
-    return { decks: [], cards: [], log: {}, assignments: [] };
+    return { decks: [], cards: [], log: {}, assignments: [], gamification: emptyGamification() };
   }
 
   dataReadFailed = false;
@@ -485,7 +516,10 @@ function loadData() {
     // function reassembles it from scratch, so it reads like a pass-through and is
     // not. Fixing parseSavedData alone still loses every assignment, one line later.
     const assignments = parsed.assignments;
-    return { decks, cards, log, assignments };
+    // Same trap the comment above describes: this return rebuilds the object from
+    // scratch, so a field missing HERE is lost even when parseSavedData carried it.
+    const gamification = normalizeGamification(parsed.gamification);
+    return { decks, cards, log, assignments, gamification };
   }
 }
 
@@ -1344,7 +1378,11 @@ function renderDashboard(data) {
   reviewBtn.disabled = due === 0;
   reviewBtn.textContent = due === 0 ? 'Nothing due' : 'Start review';
 
-  document.getElementById('dash-streak').textContent = studyStreak(data.log);
+  // Freeze-aware, same as Progress. A read, never syncGamification() — renderDashboard
+  // runs on every Home render and must not write. Sibling of the bug found on the
+  // Progress screen: two streak numbers in one app is worse than either being wrong.
+  document.getElementById('dash-streak').textContent =
+    calculateStreak(data.log, normalizeGamification(data.gamification).frozenDays, Date.now());
   document.getElementById('dash-total').textContent = data.cards.length;
   document.getElementById('dash-week').textContent = reviewsInLastDays(data.log, 7);
 
@@ -1756,6 +1794,7 @@ function finishReview() {
   document.getElementById('review-active').style.display = 'none';
   document.getElementById('review-caughtup').style.display = 'none';
   document.getElementById('review-done').style.display = 'block';
+  renderSessionReward('review-reward');
   const deck = getDeck(currentDeckId);
   setCrumb(deck ? deck.name : '');
 }
@@ -1896,6 +1935,7 @@ function finishQuiz() {
   const pct = total ? Math.round(quizScore / total * 100) : 0;
   document.getElementById('quiz-active').style.display = 'none';
   document.getElementById('quiz-done').style.display = 'block';
+  renderSessionReward('quiz-reward');
   document.getElementById('quiz-score-title').textContent = `You scored ${quizScore} / ${total}`;
   document.getElementById('quiz-score-text').textContent =
     pct >= 80 ? `${pct}% — strong. These are close to locked in.`
@@ -2014,6 +2054,7 @@ function finishCram() {
   const uniqueCards = new Set(cramState.queue).size;
   document.getElementById('cram-active').style.display = 'none';
   document.getElementById('cram-done').style.display = 'block';
+  renderSessionReward('cram-reward');
   document.getElementById('cram-score-title').textContent =
     `Deck crammed — ${uniqueCards} card${uniqueCards === 1 ? '' : 's'}`;
   document.getElementById('cram-score-text').textContent = cramState.misses === 0
@@ -4874,6 +4915,338 @@ function studyStreak(log) {
   return streak;
 }
 
+/* ── PURE gamification ───────────────────────────────────────────
+   14. GAMIFICATION v1 (feature #32), pure half.
+
+   Built on evidence, and deliberately narrow. Duolingo measured +14% day-14
+   retention on the streak-freeze mechanic specifically, because it targets LOSS
+   AVERSION — the thing that actually makes people quit is not boredom, it is
+   breaking a 40-day streak over one bad Tuesday and deciding it is ruined.
+
+   The SDT caveat from the Feature Ideas note is respected: badges reward
+   COMPETENCE (cards actually reviewed, decks actually mastered), never mere
+   attendance. Rewarding logins is the version that undermines intrinsic
+   motivation; rewarding demonstrated skill does not.
+
+   Sliced by "04 System/(C) test-gamification.mjs" — no DOM, no storage, no clock
+   of its own. `now` is always passed in, so streak logic is testable without
+   waiting for tomorrow.
+   ---------------------------------------------------------------- */
+
+const FREEZE_EVERY = 10;        // days of streak per earned freeze
+const MASTERY_MIN_CARDS = 10;   // below this, "90% mastered" is arithmetic, not skill
+
+/* Local day key. Duplicated from dayKey() on purpose: this block is lifted out and
+   evaluated standalone by the suite, and naming an outside identifier throws a
+   ReferenceError that takes the whole slice down. Same reason section 1E has its own. */
+function gDayKey(ts) {
+  const d = new Date(ts);
+  const p = n => (n < 10 ? '0' : '') + n;
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+/**
+ * Days in a row, counting frozen days as studied.
+ *
+ * Takes the LIST of frozen days, not a count of remaining freezes. That is the whole
+ * correctness argument: a function that consumed from a count would return a smaller
+ * number every time it ran on the same history, and the streak would shrink on its
+ * own between renders. This is a pure read — call it a thousand times, same answer
+ * (pinned by G11).
+ */
+function calculateStreak(log, frozenDays, now) {
+  const frozen = new Set(Array.isArray(frozenDays) ? frozenDays : []);
+  const safeLog = log || {};
+  const counts = d => (safeLog[gDayKey(d)] || 0) > 0 || frozen.has(gDayKey(d));
+
+  const cursor = new Date(now);
+  cursor.setHours(0, 0, 0, 0);
+  // Today with no reviews yet does not mean the streak is broken — it means the day
+  // is not over. Anchor on yesterday in that case.
+  if (!counts(cursor)) cursor.setDate(cursor.getDate() - 1);
+
+  let streak = 0;
+  while (counts(cursor)) { streak++; cursor.setDate(cursor.getDate() - 1); }
+  return streak;
+}
+
+/**
+ * How many new freezes this streak has earned, and the new high-water mark.
+ *
+ * earnedAt is what stops the same milestone paying out on every render. It never
+ * falls back when a streak breaks: freezes are earned, not rented (G16).
+ */
+function freezeGrant(streak, earnedAt) {
+  const reached = Math.floor((streak || 0) / FREEZE_EVERY) * FREEZE_EVERY;
+  const paid = earnedAt || 0;
+  if (reached <= paid) return { grant: 0, earnedAt: paid };
+  return { grant: (reached - paid) / FREEZE_EVERY, earnedAt: reached };
+}
+
+/**
+ * Should a freeze be spent right now, and on which day?
+ *
+ * Pure: it reports a decision and deducts nothing. The caller persists.
+ *
+ * The rule that matters is the last one. A freeze is only spent when it is actually
+ * PROTECTING a streak — if the day before the gap was not studied either, the streak
+ * was already gone and spending here buys nothing. Without that guard the bank
+ * drains quietly and only shows up weeks later as "where did my freezes go?" (G21).
+ */
+function freezeSpend(log, frozenDays, freezes, now) {
+  if (!freezes || freezes <= 0) return { spend: false, day: '', reason: 'no-freezes' };
+
+  const safeLog = log || {};
+  const frozen = new Set(Array.isArray(frozenDays) ? frozenDays : []);
+  const counts = d => (safeLog[gDayKey(d)] || 0) > 0 || frozen.has(gDayKey(d));
+
+  const yesterday = new Date(now);
+  yesterday.setHours(0, 0, 0, 0);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (counts(yesterday)) return { spend: false, day: '', reason: 'nothing-missed' };
+
+  // Was there a live streak immediately before the gap? If not, nothing to protect.
+  const before = new Date(yesterday);
+  before.setDate(before.getDate() - 1);
+  if (!counts(before)) return { spend: false, day: '', reason: 'no-streak-to-protect' };
+
+  return { spend: true, day: gDayKey(yesterday), reason: 'bridged' };
+}
+
+/* The badge catalogue. Shapes are geometric primitives drawn as plain SVG at stroke
+   weight 1 — Monochrome Futurist, no colour, no animation, nothing that pulses at you
+   while you are trying to study. Deliberately NO `color` field: if a badge could
+   carry one, one eventually would (G29). */
+const BADGES = {
+  'reviews-100':  { label: '100 cards reviewed',  shape: 'circle' },
+  'reviews-500':  { label: '500 cards reviewed',  shape: 'square' },
+  'reviews-1000': { label: '1000 cards reviewed', shape: 'hexagon' },
+  'streak-7':     { label: '7-day streak',        shape: 'triangle' },
+  'streak-30':    { label: '30-day streak',       shape: 'diamond' },
+  'streak-100':   { label: '100-day streak',      shape: 'star' },
+  'mastery':      { label: 'Deck mastered',       shape: 'ring' }
+};
+
+/**
+ * Every badge the current stats satisfy. Returns the FULL set, not the new ones —
+ * the caller diffs against what is already stored to find what was just earned.
+ *
+ * Competence only. There is deliberately no "opened the app 5 days running" badge:
+ * that is attendance, and rewarding attendance is the version of this that damages
+ * intrinsic motivation.
+ */
+function checkMilestones(s) {
+  const stats = s || {};
+  const earned = [];
+  const reviews = stats.totalReviews || 0;
+  const streak = stats.streak || 0;
+
+  if (reviews >= 100) earned.push('reviews-100');
+  if (reviews >= 500) earned.push('reviews-500');
+  if (reviews >= 1000) earned.push('reviews-1000');
+  if (streak >= 7) earned.push('streak-7');
+  if (streak >= 30) earned.push('streak-30');
+  if (streak >= 100) earned.push('streak-100');
+
+  // A deck badge needs real mastery over a real deck. 90% of three cards is
+  // arithmetic, not competence — without the floor, a 1-card deck mints a badge.
+  for (const d of (stats.decks || [])) {
+    if ((d.total || 0) >= MASTERY_MIN_CARDS && (d.pct || 0) >= 90) earned.push('master-' + d.id);
+  }
+  return earned;
+}
+
+/**
+ * The end-of-session reveal: a small, honest, VARIABLE reward.
+ *
+ * Variable is the mechanic — a reveal that always says the same sentence is a label,
+ * not a reward. Deterministic given a seed so it can be tested (G32) while still
+ * differing run to run (G31), because the caller seeds it from the clock.
+ *
+ * Everything here is computed from data that already exists. The project already
+ * rejected the prototype's "Retention 84%" because the log records how many reviews
+ * happened, never whether they were right — so retention cannot be computed. A reward
+ * that fabricates progress is worse than no reward (G33).
+ */
+function sessionReward(kind, s, seed) {
+  const stats = s || {};
+  const reviews = stats.totalReviews || 0;
+  const streak = stats.streak || 0;
+  const decks = stats.decks || [];
+
+  const options = [];
+
+  options.push({
+    kind: 'effort',
+    title: 'Session done',
+    text: reviews > 0
+      ? `That is ${reviews} card${reviews === 1 ? '' : 's'} reviewed all together.`
+      : 'First session logged. The next one is where spaced repetition starts paying.'
+  });
+
+  if (streak > 0) {
+    options.push({
+      kind: 'streak',
+      title: `${streak}-day streak`,
+      // Say how close the next freeze is — a concrete near-term goal beats a vague one.
+      text: (() => {
+        const toNext = FREEZE_EVERY - (streak % FREEZE_EVERY);
+        return toNext === FREEZE_EVERY
+          ? 'You just earned a streak freeze.'
+          : `${toNext} more day${toNext === 1 ? '' : 's'} until your next streak freeze.`;
+      })()
+    });
+  }
+
+  // A round number you have just crossed is a genuinely rare event, so it is worth
+  // surfacing when it happens rather than inventing something.
+  if (reviews >= 100) {
+    const nextMark = reviews < 500 ? 500 : reviews < 1000 ? 1000 : null;
+    options.push({
+      kind: 'rare',
+      title: 'Milestone',
+      text: nextMark
+        ? `${reviews} reviewed. ${nextMark - reviews} to go until ${nextMark}.`
+        : `${reviews} cards reviewed. That is a lot of retrieval practice.`
+    });
+  }
+
+  const climbing = decks.filter(d => (d.pct || 0) > 0 && (d.pct || 0) < 100)
+                        .sort((a, b) => (b.pct || 0) - (a.pct || 0))[0];
+  if (climbing) {
+    options.push({
+      kind: 'mastery',
+      title: climbing.name || 'Deck progress',
+      text: `${climbing.pct}% of this deck is now mature. Mastery counts cards you got right after a real gap.`
+    });
+  }
+
+  const i = Math.abs(Math.floor(seed || 0)) % options.length;
+  return options[i];
+}
+
+/* ── END PURE gamification ── */
+
+/* ── Gamification, impure half (feature #32) ──────────────────────
+
+   One entry point. Called on load and after every session, it does the whole cycle:
+   spend a freeze if a day was missed, grant freezes the streak has earned, and record
+   any newly satisfied badges. Everything it writes goes through saveData, so the #19
+   write lock still guards it. */
+
+/** Roll the current stats up into the shape the pure functions expect. */
+function gamificationStats(data) {
+  const g = normalizeGamification(data.gamification);
+  const totalReviews = Object.values(data.log || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+  const decks = (data.decks || []).map(d => {
+    const m = deckMastery((data.cards || []).filter(c => c.deckId === d.id));
+    return { id: d.id, name: d.name, total: m.total, pct: m.pct };
+  });
+  return { totalReviews, streak: calculateStreak(data.log, g.frozenDays, Date.now()), decks };
+}
+
+/**
+ * Apply every gamification rule and persist what changed.
+ *
+ * Returns what was newly earned so a caller can announce it. Writes only when
+ * something actually changed — a no-op save on every render would churn localStorage
+ * and, worse, hide a real change in the noise.
+ */
+function syncGamification() {
+  const data = loadData();
+  const g = normalizeGamification(data.gamification);
+  let next = { ...g, frozenDays: [...g.frozenDays], badges: [...g.badges] };
+  let changed = false;
+
+  // 1. A missed day, bridged. Done before the streak is read so the grant below sees
+  //    the repaired streak rather than a broken one.
+  const spend = freezeSpend(data.log, next.frozenDays, next.freezes, Date.now());
+  if (spend.spend) {
+    next.freezes -= 1;
+    next.frozenDays = [...next.frozenDays, spend.day];
+    changed = true;
+  }
+
+  // 2. Freezes the streak has earned.
+  const streak = calculateStreak(data.log, next.frozenDays, Date.now());
+  const grant = freezeGrant(streak, next.earnedAt);
+  if (grant.grant > 0) {
+    next.freezes += grant.grant;
+    next.earnedAt = grant.earnedAt;
+    changed = true;
+  }
+
+  // 3. Badges. checkMilestones returns everything currently satisfied; the diff
+  //    against what is stored is what is NEW.
+  const stats = { ...gamificationStats(data), streak };
+  const earnedNow = checkMilestones(stats);
+  const fresh = earnedNow.filter(id => !next.badges.includes(id));
+  if (fresh.length) {
+    next.badges = [...next.badges, ...fresh];
+    changed = true;
+  }
+
+  if (changed) saveData({ ...data, gamification: next });
+  return { newBadges: fresh, freezeSpent: spend.spend ? spend.day : '', streak, gamification: next };
+}
+
+/** Human label for a badge id, including the per-deck mastery ones. */
+function badgeLabel(id, data) {
+  if (BADGES[id]) return BADGES[id].label;
+  if (id.startsWith('master-')) {
+    const deck = (data.decks || []).find(d => d.id === id.slice(7));
+    return deck ? 'Mastered · ' + deck.name : 'Deck mastered';
+  }
+  return id;
+}
+
+function badgeShape(id) {
+  return (BADGES[id] || BADGES.mastery).shape;
+}
+
+/* Geometric primitives at stroke weight 1. No fills, no colour, no animation —
+   Monochrome Futurist, and nothing that pulses while you are trying to study. */
+const BADGE_SHAPES = {
+  circle:   '<circle cx="18" cy="18" r="12"/>',
+  square:   '<rect x="7" y="7" width="22" height="22"/>',
+  hexagon:  '<path d="M18 5l11 6.5v13L18 31 7 24.5v-13z"/>',
+  triangle: '<path d="M18 6l12 22H6z"/>',
+  diamond:  '<path d="M18 5l13 13-13 13L5 18z"/>',
+  star:     '<path d="M18 5l3.8 9.2 9.9.8-7.5 6.5 2.3 9.7-8.5-5.2-8.5 5.2 2.3-9.7L4.3 15l9.9-.8z"/>',
+  ring:     '<circle cx="18" cy="18" r="12"/><circle cx="18" cy="18" r="6"/>'
+};
+
+function badgeSvg(id) {
+  return `<svg viewBox="0 0 36 36" aria-hidden="true" class="badge-icon">${
+    BADGE_SHAPES[badgeShape(id)] || BADGE_SHAPES.circle}</svg>`;
+}
+
+/**
+ * The end-of-session reveal, painted into whichever done-panel just appeared.
+ *
+ * Seeded from the clock so the reward varies run to run, which is the entire
+ * mechanic — a reveal that always says the same sentence is a label, not a reward.
+ */
+function renderSessionReward(containerId) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const result = syncGamification();
+  const data = loadData();
+  const reward = sessionReward('review', { ...gamificationStats(data), streak: result.streak },
+                               Math.floor(Date.now() / 1000));
+
+  const badges = result.newBadges.map(id => `
+      <div class="badge-new">${badgeSvg(id)}<span>${escapeHtml(badgeLabel(id, data))}</span></div>`).join('');
+
+  box.innerHTML = `
+    <div class="reward-panel">
+      <div class="reward-title">${escapeHtml(reward.title)}</div>
+      <p class="reward-text">${escapeHtml(reward.text)}</p>
+      ${result.freezeSpent ? '<p class="reward-freeze">A streak freeze covered the day you missed.</p>' : ''}
+      ${badges ? `<div class="badge-row">${badges}</div>` : ''}
+    </div>`;
+}
+
 /* Longest streak ever: the biggest run of back-to-back logged days. */
 function longestStreak(log) {
   const days = Object.keys(log).filter(k => log[k] > 0).sort();
@@ -4922,11 +5295,52 @@ function renderStats() {
   cards.forEach(c => { buckets[cardStatus(c)]++; });
   const due = cards.filter(c => (c.srs?.due ?? 0) <= Date.now()).length;
 
+  // Gamification lives HERE and at session end — never on Home. The Focus layout
+  // (#30) exists to answer information overload; putting badges on it would undo
+  // the feature that was built two days earlier.
+  const g = syncGamification();
+
+  // THE STREAK SHOWN HERE MUST BE THE FREEZE-AWARE ONE. studyStreak() predates #32
+  // and does not know frozen days exist, so it reported 3 while the reward panel and
+  // the freeze grant both said 40 — two different streaks on one screen, and the
+  // freeze feature invisible exactly where someone would look for it. Caught by
+  // screenshotting Progress, not by any check.
   body.innerHTML =
-    statCardsHtml(studyStreak(log), longestStreak(log), log[dayKey(Date.now())] || 0, reviewsInLastDays(log, 7)) +
+    statCardsHtml(g.streak, longestStreak(log), log[dayKey(Date.now())] || 0, reviewsInLastDays(log, 7)) +
+    gamificationSectionHtml(g.gamification, data) +
     statusSectionHtml(buckets, cards.length, due) +
     reviewsBarHtml(log) +
     weakSpotsHtml(cards, data.decks);
+}
+
+/* Badges and streak freezes on the Progress screen.
+
+   Deliberately understated: earned badges only, no greyed-out "locked" grid. A wall
+   of things you have not done is a guilt board, and this feature is supposed to help
+   someone keep going, not itemise what they are missing. */
+function gamificationSectionHtml(g, data) {
+  const freezes = g.freezes || 0;
+  const badges = g.badges || [];
+  if (!freezes && !badges.length && !(g.frozenDays || []).length) return '';
+
+  const badgeHtml = badges.map(id => `
+      <div class="badge" title="${escapeHtml(badgeLabel(id, data))}">
+        ${badgeSvg(id)}<span class="badge-label">${escapeHtml(badgeLabel(id, data))}</span>
+      </div>`).join('');
+
+  const used = (g.frozenDays || []).length;
+  return `
+    <section class="stats-section">
+      <h2 class="stats-h2">Milestones</h2>
+      <div class="freeze-line">
+        <span class="freeze-n">${freezes}</span>
+        <span class="freeze-l">streak freeze${freezes === 1 ? '' : 's'} banked${
+          used ? ` · ${used} used so far` : ''}</span>
+      </div>
+      <p class="freeze-sub">You earn one every ${FREEZE_EVERY} days. If you miss a day, one is
+        spent automatically so the streak survives.</p>
+      ${badgeHtml ? `<div class="badge-grid">${badgeHtml}</div>` : ''}
+    </section>`;
 }
 
 /* Reviews per day for the last two weeks. Bars are pure CSS heights — no

@@ -473,6 +473,47 @@ h1.page{font-family:var(--font-display);font-weight:300;font-size:36px;letter-sp
 #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);z-index:60;background:var(--ink);color:var(--on-inverse);padding:11px 18px;border-radius:var(--r);font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:opacity 200ms,transform 200ms;max-width:90vw;text-align:center}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
+/* ── Gamification (feature #32) ───────────────────────────────────
+   Monochrome Futurist, and deliberately quiet. Badges are line drawings at stroke
+   weight 1 — no fills, no colour, no animation. The whole risk with gamification is
+   that it starts competing with the studying; anything that pulses or glows here
+   would be doing exactly that.
+
+   Nothing in this block appears on Home. Gamification shows on Progress and at the
+   end of a session only — putting it on Home would undo #30, built two days earlier
+   to answer information overload. */
+
+.reward-panel{margin:22px auto 4px;max-width:420px;padding:18px 20px;
+  border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface-1);
+  text-align:center}
+.reward-title{font-family:var(--font-display);font-weight:200;font-size:22px;
+  letter-spacing:0.01em;margin-bottom:6px}
+.reward-text{font-size:14px;color:var(--ink-2);line-height:1.5;margin:0}
+.reward-freeze{margin:10px 0 0;font-size:13px;color:var(--ink-3)}
+
+.badge-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:16px;
+  padding-top:14px;border-top:1px solid var(--border)}
+.badge-new{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500}
+
+.badge-icon{width:22px;height:22px;flex:none;fill:none;stroke:currentColor;
+  stroke-width:1;stroke-linejoin:round}
+
+.freeze-line{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+.freeze-n{font-family:var(--font-display);font-weight:200;font-size:40px;line-height:1;
+  font-variant-numeric:tabular-nums}
+.freeze-l{font-size:14px;color:var(--ink-2)}
+.freeze-sub{margin:0 0 16px;font-size:13px;color:var(--ink-3);max-width:52ch;line-height:1.5}
+
+.badge-grid{display:flex;flex-wrap:wrap;gap:10px}
+.badge{display:flex;align-items:center;gap:9px;padding:9px 14px;
+  border:1px solid var(--border);border-radius:var(--r-full);font-size:13px;font-weight:500}
+.badge-label{white-space:nowrap}
+.badge .badge-icon{width:20px;height:20px}
+@media (max-width:720px){
+  .badge{padding:8px 12px;font-size:12px}
+  .badge .badge-icon{width:18px;height:18px}
+}
+
 /* ── "Focus" Home layout (feature #30) ────────────────────────────
    A tunnel: one number, one button, one line. Everything else is switched off, not
    restyled — Split is untouched and stays the default.

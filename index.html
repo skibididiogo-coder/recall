@@ -307,6 +307,9 @@
           <div class="done-stat"><div class="done-stat-n" id="cnt-good">0</div><div class="done-stat-l">Good</div></div>
           <div class="done-stat"><div class="done-stat-n" id="cnt-easy" style="color:var(--success)">0</div><div class="done-stat-l">Easy</div></div>
         </div>
+        <!-- Effort reveal (feature #32). Deliberately BELOW the session stats: the
+             reward supplements the honest numbers, it never replaces them. -->
+        <div id="review-reward"></div>
         <div class="done-actions">
           <button class="btn btn-primary" onclick="goDeck(currentDeckId)">Back to deck</button>
           <button class="btn btn-outline" onclick="goDecks()">All decks</button>
@@ -344,6 +347,7 @@
         </div>
         <h1 id="quiz-score-title">Quiz complete</h1>
         <p id="quiz-score-text">—</p>
+        <div id="quiz-reward"></div>
         <div class="done-actions">
           <button class="btn btn-primary" onclick="startQuiz()">Retake quiz</button>
           <button class="btn btn-outline" onclick="goDeck(currentDeckId)">Back to deck</button>
@@ -387,6 +391,7 @@
         </div>
         <h1 id="cram-score-title">Deck crammed</h1>
         <p id="cram-score-text">—</p>
+        <div id="cram-reward"></div>
         <div class="done-actions">
           <button class="btn btn-primary" onclick="cramAgain()">Cram again</button>
           <button class="btn btn-outline" onclick="goDeck(currentDeckId)">Back to deck</button>
