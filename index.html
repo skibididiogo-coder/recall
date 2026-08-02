@@ -56,7 +56,7 @@
        Split from the decks library 2026-07-27: one screen was carrying eleven
        things. Home answers "what do I study now?"; Decks answers "what do I have?" -->
   <section id="screen-home" class="screen active">
-    <div class="dash-header">
+    <div class="dash-header" id="dash-header">
       <div>
         <div class="dash-date" id="dash-date">—</div>
         <h1 class="dash-h1" id="dash-greeting">Recall</h1>
@@ -70,6 +70,15 @@
     <!-- Backup nudge / unreadable-data warning (feature #19). Urgent, so it stays
          on the front page. Renders nothing when there is nothing to say. -->
     <div class="backup-nudge" id="backup-nudge" style="display:none"></div>
+
+    <!-- Layout switch (feature #30). Lives OUTSIDE #dash-header on purpose: the header
+         is one of the things Focus hides, so a toggle placed inside it would vanish in
+         Focus mode and the only way back would be clearing localStorage. Pinned by F15. -->
+    <div class="home-layout-row">
+      <button class="btn btn-ghost btn-sm" id="home-layout-btn" aria-pressed="false"
+              onclick="onToggleHomeLayout()"
+              title="Switch between the full dashboard and a single-number view">Focus mode</button>
+    </div>
 
     <!-- Hidden entirely when there are no decks: a dashboard of zeroes is worse
          than a welcome. -->
@@ -85,10 +94,10 @@
         </div>
         <div class="due-actions">
           <button class="btn btn-dark" id="dash-review-btn" onclick="startDueReview()">Start review</button>
-          <button class="btn btn-outline" onclick="goDecks()">Browse decks</button>
+          <button class="btn btn-outline" id="dash-browse-btn" onclick="goDecks()">Browse decks</button>
         </div>
       </div>
-      <div class="stats-panel">
+      <div class="stats-panel" id="dash-stats-panel">
         <div class="stats-panel-label">This week</div>
         <div class="stats-list">
           <div class="stat-row"><span class="stat-n" id="dash-streak">0</span><span class="stat-l">Day streak</span></div>

@@ -1190,6 +1190,104 @@ function goHome() {
   showScreen('home');
 }
 
+/* ── PURE home-layout ────────────────────────────────────────────
+   6B. THE "FOCUS" HOME LAYOUT (feature #30), pure half.
+
+   Why it exists: the vault names Diogo's blind spot outright — "gets overwhelmed by
+   information overload." Split shows five things at once (greeting, due panel, stats,
+   assignments, heatmap). Focus shows three: a number, a button, a line.
+
+   It is an OPTION. Split remains the default and is not modified.
+
+   Sliced by "04 System/(C) test-focus.mjs" — must stay free of DOM and localStorage.
+   ---------------------------------------------------------------- */
+
+const HOME_LAYOUT_KEY = 'recall.settings.homeLayout';
+const HOME_LAYOUTS = ['split', 'focus'];
+
+/* Anything that is not exactly 'focus' reads as 'split'. Deliberately strict: a
+   corrupted or hand-edited value must not strand someone in a layout they never
+   chose and might not know how to leave. */
+function parseHomeLayout(raw) {
+  return raw === 'focus' ? 'focus' : 'split';
+}
+
+function nextHomeLayout(current) {
+  return parseHomeLayout(current) === 'focus' ? 'split' : 'focus';
+}
+
+/* Which parts of Home this layout renders. One object, so the render function reads
+   as a list of decisions rather than a pile of if-statements — and so the decisions
+   are testable without a browser.
+
+   Every value is an explicit boolean. A missing key would read as undefined, which is
+   falsy, so a typo in a section name would quietly HIDE that section instead of
+   failing loudly. Check F17 pins that. */
+function homeSections(layout) {
+  const focus = parseHomeLayout(layout) === 'focus';
+  return {
+    // The three the spec asked for.
+    dueNumber:    true,
+    reviewButton: true,
+    estimate:     true,
+
+    // NOT hidden in Focus, on purpose. This is the #19 data-loss warning and the
+    // 2026-07-30 "your backups are off" notice. It is safety, not decoration —
+    // a tidy screen that stops warning you is how the Descobrimentos deck died.
+    backupNudge:  true,
+
+    // Always reachable, or Focus becomes a trap whose only exit is clearing
+    // localStorage.
+    layoutToggle: true,
+
+    // Everything Focus removes.
+    greeting:     !focus,
+    stats:        !focus,
+    assignments:  !focus,
+    heatmap:      !focus,
+    browseButton: !focus
+  };
+}
+
+/* ── END PURE home-layout ── */
+
+/* Read the stored layout. Wrapped because localStorage throws in private mode, and a
+   preference is never a reason to take the Home screen down. */
+function currentHomeLayout() {
+  try { return parseHomeLayout(localStorage.getItem(HOME_LAYOUT_KEY)); }
+  catch (e) { return 'split'; }
+}
+
+function onToggleHomeLayout() {
+  const next = nextHomeLayout(currentHomeLayout());
+  try { localStorage.setItem(HOME_LAYOUT_KEY, next); } catch (e) { /* private mode */ }
+  renderHome();
+}
+
+/* Apply the section plan to the DOM. Every element the plan names is switched here and
+   nowhere else, so "what does Focus hide" has exactly one answer in the code. */
+function applyHomeLayout(layout) {
+  const s = homeSections(layout);
+  const show = (id, on) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden-by-layout', !on);
+  };
+  show('dash-header', s.greeting);
+  show('dash-stats-panel', s.stats);
+  show('dash-assignments', s.assignments);
+  show('dash-activity', s.heatmap);
+  show('dash-browse-btn', s.browseButton);
+
+  // The toggle itself: always present, and it says where it takes you.
+  const btn = document.getElementById('home-layout-btn');
+  if (btn) {
+    const focus = layout === 'focus';
+    btn.textContent = focus ? 'Show full dashboard' : 'Focus mode';
+    btn.setAttribute('aria-pressed', focus ? 'true' : 'false');
+  }
+  document.getElementById('screen-home').classList.toggle('home-focus', layout === 'focus');
+}
+
 function renderHome() {
   const data = loadData();
   renderBackupNudge();     // must run AFTER loadData, which is what arms the lock
@@ -1199,6 +1297,10 @@ function renderHome() {
   // the person this feature was designed for — someone who logs a Filosofia test before
   // creating a Filosofia deck. Pinned by check W5.
   renderAssignmentsPanel(data);
+  // LAST, deliberately. renderDashboard and renderAssignmentsPanel both set
+  // .style.display on the elements this hides; running the layout first would let
+  // them undo it. Pinned by the live check.
+  applyHomeLayout(currentHomeLayout());
 }
 
 function renderDashboard(data) {
