@@ -401,6 +401,10 @@
           <div class="chat-source" id="chat-source">—</div>
         </div>
         <span class="sources-badge" title="Answers come only from this deck's material">● Sources only</span>
+        <!-- The thread now survives navigation (feature #29), so ending it has to be
+             a deliberate act. Without this the only way out is reloading the page. -->
+        <button class="btn btn-ghost btn-sm" id="chat-new-btn" onclick="onNewConversation()"
+                title="Clear this deck's conversation and start over">New conversation</button>
       </div>
 
       <div class="chat-thread" id="chat-thread"></div>

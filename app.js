@@ -753,6 +753,10 @@ function deleteDeck(deckId) {
     decks: data.decks.filter(d => d.id !== deckId),
     cards: data.cards.filter(c => c.deckId !== deckId)
   });
+  // Drop the in-memory chat thread too (feature #29). Ids are unique, so this is
+  // belt-and-braces rather than a live bug — but a deleted deck leaving its
+  // conversation behind is exactly the kind of thing that becomes one later.
+  chatHistoryStore = forgetChat(chatHistoryStore, deckId);
 }
 
 function addCard(deckId, front, back) {
@@ -2608,6 +2612,41 @@ function parseChatResponse(data) {
   return { ok: true, text };
 }
 
+/* ── Chat history that survives leaving the screen (feature #29) ──
+
+   Before this, goChatForDeck() ran `chatHistory = []` on EVERY entry — including
+   re-entering the SAME deck. The natural way to use chat (ask, go look at the card
+   in Review, come back) was the one way that destroyed the thread.
+
+   A store keyed by deckId, so switching decks and returning costs nothing. All three
+   are IMMUTABLE per the vault's coding rule: they return a new object rather than
+   editing the one they were handed.
+
+   Deliberately in memory only. Persisting to saveData() would write every exchange
+   into localStorage — a bigger change, and the note that logged this asked only for
+   survival across in-app navigation, not across reloads. */
+function chatHistoryFor(store, deckId) {
+  if (!store || !deckId) return [];
+  const h = store[deckId];
+  // A non-array here means something corrupted the store. Degrade to a fresh thread
+  // rather than handing renderChat() something it will crash on.
+  return Array.isArray(h) ? h : [];
+}
+
+function rememberChat(store, deckId, history) {
+  const base = store || {};
+  if (!deckId) return base;
+  return { ...base, [deckId]: Array.isArray(history) ? history : [] };
+}
+
+function forgetChat(store, deckId) {
+  const base = store || {};
+  if (!deckId || !(deckId in base)) return base;
+  const next = { ...base };
+  delete next[deckId];
+  return next;
+}
+
 /* ── 9B-impure. The live call + the chat screen ── */
 
 /* One question → one API call. Uses Sonnet (cheaper + faster than the Opus
@@ -2658,7 +2697,10 @@ async function callClaudeChat(context, history, question) {
   return r.text;
 }
 
-// Chat state is transient by design — leave the screen and the thread is gone.
+// Chat threads survive leaving the screen (feature #29), kept per deck for the tab
+// session. chatHistory is the thread currently on screen; chatHistoryStore holds it
+// for every deck chatted this session. A reload still clears everything, by design.
+let chatHistoryStore = {};   // { [deckId]: [{ role, text }] }
 let chatHistory = []; // [{ role: 'user' | 'assistant', text }]
 let chatErrorRetryable = false;   // only a transient failure gets a Try again button
 let chatRetryQuestion = '';       // the question that failed, so Retry resends it
@@ -2672,7 +2714,10 @@ function goChatForDeck() {
   chatContext = buildChatContext(deck, cardsForDeck(currentDeckId));
   if (chatContext.kind === 'none') { toast('Add cards or material before chatting'); return; }
 
-  chatHistory = [];
+  // Pick the thread back up instead of destroying it. Entering a DIFFERENT deck still
+  // starts clean, because the store is keyed by deck — inheriting another deck's
+  // conversation would be worse than losing it.
+  chatHistory = chatHistoryFor(chatHistoryStore, currentDeckId);
   chatBusy = false;
   chatError = '';
   setCrumb(deck.name + ' · Chat');
@@ -2781,9 +2826,25 @@ async function onSendChat() {
     chatRetryQuestion = question;
   } finally {
     chatBusy = false;
+    // Persist for the session AFTER the exchange settles, success or failure. On
+    // failure chatHistory has already been rolled back to complete exchanges only,
+    // so a failed question is never stored and never resent as context later.
+    chatHistoryStore = rememberChat(chatHistoryStore, currentDeckId, chatHistory);
     renderChat();
     if (!chatError) input.focus();
   }
+}
+
+/* Start over on purpose. The thread now survives navigation, so there has to be a
+   deliberate way to end it — otherwise the only escape is reloading the page. */
+function onNewConversation() {
+  chatHistoryStore = forgetChat(chatHistoryStore, currentDeckId);
+  chatHistory = [];
+  chatError = '';
+  chatErrorRetryable = false;
+  chatBusy = false;
+  renderChat();
+  document.getElementById('chat-input').focus();
 }
 
 /* ----------------------------------------------------------------

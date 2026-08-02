@@ -4,7 +4,7 @@
 // Keeps its exact filename (no "(C)" prefix) because a service worker's PATH defines
 // its scope — it must sit at the app root. Tool-imposed name, per the vault CLAUDE.md.
 
-const BUILD_ID = 'c638b240b066';
+const BUILD_ID = 'a731d3039f46';
 const CACHE    = 'recall-' + BUILD_ID;
 const SHELL    = new URL('./index.html', self.location).href;
 
