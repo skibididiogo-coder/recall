@@ -72,6 +72,26 @@ function normalizeGamification(g) {
   };
 }
 
+/* Every read path must hand back assignments that ALREADY carry gcalEventId
+   (feature #33).
+
+   A missing key reads as `undefined`, and `undefined` in the diff is not "no event":
+   it compares unequal to everything, so every already-synced assignment would
+   silently get a SECOND event on the next sync. Only a non-empty string can name a
+   Google event — a number, null or "" all degrade to null.
+
+   Defined HERE, at the top of 1B, and not down in the gcal block: (C) test-backup.mjs
+   and (C) test-migration.mjs evaluate only the 1B slice, so a helper defined later is
+   not in scope for the very functions below that call it. */
+function normalizeGcalEventId(v) {
+  return typeof v === 'string' && v ? v : null;
+}
+
+function normalizeAssignmentsForGcal(list) {
+  return (Array.isArray(list) ? list : [])
+    .map(a => (a ? { ...a, gcalEventId: normalizeGcalEventId(a.gcalEventId) } : a));
+}
+
 function parseSavedData(raw) {
   // No key at all = a genuinely new install. Empty, but not a fault.
   if (raw === null || raw === undefined || raw === '') {
@@ -101,7 +121,9 @@ function parseSavedData(raw) {
       // unreadable. Anything that is not an array degrades to [] rather than becoming
       // a `wrong-shape` refusal, because a refusal here arms the #19 write lock
       // against a library that is otherwise perfectly good.
-      assignments: Array.isArray(parsed.assignments) ? parsed.assignments : [],
+      // Rebuild site 2. normalizeAssignmentsForGcal backfills gcalEventId: null on
+      // any assignment saved before #33 — see check E2 in (C) test-gcal.mjs.
+      assignments: normalizeAssignmentsForGcal(parsed.assignments),
       // `gamification` (feature #32) is the newest field and follows the same rule as
       // assignments: anything unusable degrades to null and is rebuilt by
       // normalizeGamification in loadData. It must NEVER make an older save
@@ -201,7 +223,10 @@ function parseBackupFile(raw) {
       // export overwriting a real library, and it is enforced identically in
       // exportData(), restorePlan() and the Python backend. Weakening it in one place
       // only would reopen the hole. Pinned by check C16 in (C) test-assignments.mjs.
-      assignments: Array.isArray(incoming.assignments) ? incoming.assignments : []
+      // Rebuild site 5. A backup written before #33 has no gcalEventId; a backup
+      // written after it carries real ones that MUST survive, or restoring
+      // duplicates every event on the next sync. Checks E4 and E6.
+      assignments: normalizeAssignmentsForGcal(incoming.assignments)
     }
   };
 }
@@ -515,6 +540,16 @@ function loadData() {
     // This return is the trap: parseSavedData hands back a clean object and this
     // function reassembles it from scratch, so it reads like a pass-through and is
     // not. Fixing parseSavedData alone still loses every assignment, one line later.
+    // Rebuild site 4. For gcalEventId this really IS a pass-through, unlike the #27
+    // case the comment above describes: `parsed` is parseSavedData's output, which
+    // already normalized the field, so re-normalizing here changes nothing.
+    //
+    // That is not an assumption — it was MEASURED. (C) mutate-gcal.mjs replaced this
+    // line with the bare `parsed.assignments` and the entire suite stayed green, which
+    // means a normalize call here would be code no test can prove. It was removed
+    // rather than left as decoration. If a future field is normalized ONLY in
+    // loadData's caller and not in parseSavedData, this line becomes load-bearing
+    // again — and the mutation will start failing, which is the signal to change it.
     const assignments = parsed.assignments;
     // Same trap the comment above describes: this return rebuilds the object from
     // scratch, so a field missing HERE is lost even when parseSavedData carried it.
@@ -897,7 +932,18 @@ function normalizeAssignment(fields, now) {
     deckId: String(f.deckId == null ? '' : f.deckId),
     done: f.done === true,
     createdAt: Number.isFinite(Number(f.createdAt)) && Number(f.createdAt) > 0
-      ? Number(f.createdAt) : now
+      ? Number(f.createdAt) : now,
+    // Declared explicitly rather than left to survive by accident. The old shape
+    // relied on updateAssignment spreading `a` FIRST to preserve unknown keys, while
+    // createAssignment dropped them — so the field lived or died depending on which
+    // path touched it. Naming it here makes both paths agree, and makes a later
+    // "tidy-up" of updateAssignment unable to silently drop it.
+    //
+    // Inlined, NOT a call to normalizeGcalEventId(): this block is lifted out and
+    // evaluated standalone by (C) test-assignments.mjs, and naming an identifier from
+    // the gcal block throws a ReferenceError that takes the whole slice down and fakes
+    // a failure for all 48 of its checks. The duplication is deliberate and cheap.
+    gcalEventId: typeof f.gcalEventId === 'string' && f.gcalEventId ? f.gcalEventId : null
   };
 }
 
@@ -951,6 +997,524 @@ function filterAssignments(list, opts) {
   });
 }
 /* ── END PURE assignments */
+
+/* ── PURE gcal ───────────────────────────────────────────────────
+   1G. GOOGLE CALENDAR SYNC (feature #33), pure half.
+
+   Everything here is a plain function of its arguments: no network, no DOM, no
+   token, no Google. Steps 1 and 4 of the sync (list, execute) are the only impure
+   parts and they are thin; every interesting bug lives in the diff below.
+
+   THIS BLOCK MUST NOT REFERENCE ANYTHING OUTSIDE ITSELF. (C) test-gcal.mjs lifts it
+   out with new Function() and evaluates it standalone; naming an outside identifier
+   (startOfDay, ASSIGNMENT_PRIORITIES) throws a ReferenceError that takes the whole
+   slice down and fakes a failure for every check in the suite.
+
+   It also sits BEFORE the SM-2 marker on purpose: the storage harness in
+   (C) test-gcal.mjs slices app.js at that marker, and the read paths call
+   normalizeAssignmentsForGcal(). Move this block below the marker and every
+   rebuild-site check dies with a ReferenceError instead of a real result.
+   ---------------------------------------------------------------- */
+
+/* Google's own palette ids. Named because "11" at a call site is unreadable. */
+const GCAL_COLOR_HIGH = '11';   // Tomato
+const GCAL_COLOR_MED  = '6';    // Tangerine
+const GCAL_COLOR_LOW  = '8';    // Graphite
+const GCAL_COLOR_DONE = '8';    // Graphite — done outranks priority
+
+/* The private marker every Recall event carries. events.list filters on it, which
+   is what makes the delete path safe: without the filter the diff would see Diogo's
+   personal events as orphans and propose deleting them. */
+const GCAL_MARKER_KEY = 'recallAssignment';
+
+/* A CONSTANT marker, and the reason the per-assignment one above is not enough.
+
+   Google's `privateExtendedProperty` filter matches an exact key=value pair and does
+   NOT wildcard, so there is no query for "every event carrying a recallAssignment key".
+   Filtering on `recallAssignment=<id>` would need one request per assignment, and
+   filtering on nothing would return Diogo's ENTIRE personal calendar — which the diff
+   would then propose deleting.
+
+   So every Recall event also carries recallApp=1, a value that never varies, and the
+   list is scoped with `privateExtendedProperty=recallApp=1`. Pinned by check B13. */
+const GCAL_APP_KEY = 'recallApp';
+const GCAL_APP_VALUE = '1';
+
+function gcalPad2(n) { return String(n).padStart(2, '0'); }
+
+/* "YYYY-MM-DD" from LOCAL date parts.
+
+   NEVER new Date(ts).toISOString().slice(0,10). toISOString converts to UTC, and at
+   UTC+1 an assignment due at 00:00 on the 15th becomes 2026-09-14T23:00Z — a deadline
+   shown a day EARLY, the one error a deadline tool must not make. Checks A1 and A3
+   use midnight timestamps precisely so that mistake cannot pass. */
+function gcalDateString(ts) {
+  const d = new Date(ts);
+  return d.getFullYear() + '-' + gcalPad2(d.getMonth() + 1) + '-' + gcalPad2(d.getDate());
+}
+
+/* Google's all-day end.date is EXCLUSIVE: a one-day event must end on the following
+   day or it renders as zero-length. Built by stepping a local Date rather than by
+   arithmetic on the string, so month, year and leap-day rollovers are the calendar's
+   problem and not ours. */
+function gcalNextDayString(dateStr) {
+  const p = String(dateStr).split('-');
+  const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  d.setDate(d.getDate() + 1);
+  return gcalDateString(d.getTime());
+}
+
+function calculateGCalDates(dueAt) {
+  const start = gcalDateString(dueAt);
+  return { start: { date: start }, end: { date: gcalNextDayString(start) } };
+}
+
+/* Subject goes in the TITLE, not the description: Google's month view renders only
+   the title, and a subject hidden in the description does not serve "see everything
+   at a glance". An assignment with no subject gets the bare title — no dangling em
+   dash, which is what check B2 exists to stop. */
+function gcalEventTitle(a) {
+  const subject = String((a && a.subject) || '').trim();
+  const title = String((a && a.title) || '').trim();
+  const base = subject ? subject + ' — ' + title : title;
+  return a && a.done === true ? '✓ ' + base : base;
+}
+
+function gcalEventColorId(a) {
+  if (!a || a.done === true) return GCAL_COLOR_DONE;
+  if (a.priority === 'high') return GCAL_COLOR_HIGH;
+  if (a.priority === 'med') return GCAL_COLOR_MED;
+  // low AND anything unrecognised. Bad data should degrade the colour, never the sync.
+  return GCAL_COLOR_LOW;
+}
+
+function gcalPriorityLabel(a) {
+  const p = a && a.priority;
+  if (p === 'high') return 'alta';
+  if (p === 'low') return 'baixa';
+  return 'média';
+}
+
+function gcalEventDescription(a) {
+  return 'Prioridade: ' + gcalPriorityLabel(a) + '\nCriado no Recall';
+}
+
+function buildGCalEvent(a) {
+  const dates = calculateGCalDates(a && a.dueAt);
+  return {
+    summary: gcalEventTitle(a),
+    description: gcalEventDescription(a),
+    start: dates.start,
+    end: dates.end,
+    colorId: gcalEventColorId(a),
+    // Notification timing was explicitly NOT designed. The calendar's own default
+    // is a decision the user already made once, everywhere.
+    reminders: { useDefault: true },
+    extendedProperties: {
+      private: {
+        // Constant — what events.list filters on.
+        [GCAL_APP_KEY]: GCAL_APP_VALUE,
+        // Per-assignment — not used for matching (gcalEventId does that), but it keeps
+        // the link recoverable if a library is ever restored without its event ids.
+        [GCAL_MARKER_KEY]: String(a && a.id)
+      }
+    }
+  };
+}
+
+/* Compares only the fields Recall OWNS. Google's etag, updated, htmlLink and every
+   field we never set are ignored, so a second sync with no local change performs
+   zero writes and reports "Nada a fazer". */
+function gcalEventMatches(desired, remoteEvent) {
+  if (!desired || !remoteEvent) return false;
+  const r = remoteEvent;
+  return String(r.summary || '') === String(desired.summary || '')
+    && String(r.description || '') === String(desired.description || '')
+    && String((r.start && r.start.date) || '') === desired.start.date
+    && String((r.end && r.end.date) || '') === desired.end.date
+    && String(r.colorId || '') === String(desired.colorId || '');
+}
+
+/* Step 3 of the sync: two arrays in, four arrays out.
+
+   `remoteEvents` must ONLY contain events Recall created — the caller scopes the
+   list by GCAL_MARKER_KEY. Everything not claimed by a local assignment is proposed
+   for deletion, so widening that query widens what gets deleted. */
+function diffCalendarEvents(localAssignments, remoteEvents) {
+  const locals = Array.isArray(localAssignments) ? localAssignments : [];
+  const remotes = Array.isArray(remoteEvents) ? remoteEvents : [];
+
+  const byId = new Map();
+  for (const e of remotes) if (e && e.id != null) byId.set(String(e.id), e);
+
+  const toCreate = [], toUpdate = [], toDelete = [], skipped = [];
+  const claimed = new Set();
+
+  for (const a of locals) {
+    if (!a) continue;
+    const eventId = typeof a.gcalEventId === 'string' && a.gcalEventId ? a.gcalEventId : null;
+    const existing = eventId ? byId.get(eventId) : undefined;
+    if (existing) claimed.add(eventId);
+
+    // dueAt 0 means "no deadline". There is nowhere to put it on a calendar, so it
+    // is reported as skipped rather than dropped in silence — items vanishing
+    // quietly is the failure shape this project has now been bitten by four times.
+    if (!(Number(a.dueAt) > 0)) {
+      if (existing) toDelete.push({ eventId, assignmentId: a.id });
+      skipped.push(a);
+      continue;
+    }
+
+    const desired = buildGCalEvent(a);
+    // A gcalEventId pointing at nothing means the event was deleted by hand in
+    // Google. Recreating it is deliberate: deletion there is self-healing, not
+    // sticky. The only way to remove one permanently is to remove the assignment.
+    if (!existing) { toCreate.push({ assignment: a, event: desired }); continue; }
+    if (!gcalEventMatches(desired, existing)) {
+      toUpdate.push({ eventId, assignment: a, event: desired });
+    }
+  }
+
+  for (const e of remotes) {
+    const id = String(e && e.id != null ? e.id : '');
+    if (id && !claimed.has(id)) toDelete.push({ eventId: id, assignmentId: null });
+  }
+
+  return { toCreate, toUpdate, toDelete, skipped };
+}
+
+function gcalCountPhrase(n, one, many) {
+  return n + ' ' + (n === 1 ? one : many);
+}
+
+/* A feature that did nothing must SAY it did nothing — the rule earned on
+   2026-07-30, when an off backup feature reported success by staying silent. */
+function summarizeGCalSync(counts) {
+  const c = counts || {};
+  const parts = [];
+  if (c.created) parts.push(gcalCountPhrase(c.created, 'criado', 'criados'));
+  if (c.updated) parts.push(gcalCountPhrase(c.updated, 'movido', 'movidos'));
+  if (c.deleted) parts.push(gcalCountPhrase(c.deleted, 'removido', 'removidos'));
+  if (c.skipped) parts.push(c.skipped + ' sem prazo');
+  return parts.length ? parts.join(' · ') : 'Nada a fazer';
+}
+
+/* normalizeGcalEventId and normalizeAssignmentsForGcal are NOT defined here.
+
+   They live in the 1B pure block instead, next to parseSavedData. (C) test-backup.mjs
+   and (C) test-migration.mjs slice app.js from `const BACKUP_STALE_DAYS` to
+   `/* ── 1B-impure`, so a read path calling a helper defined down here fails with
+   "normalizeAssignmentsForGcal is not defined" across both suites — which is exactly
+   what happened while building this feature. The helper must sit at or above the
+   highest slice that calls it. */
+/* ── END PURE gcal */
+
+/* ── 1G-impure. GOOGLE CALENDAR SYNC — the thin outside half ─────
+   Steps 1 and 4 of the sync (list, execute). Everything decidable lives in the pure
+   block above; this part only moves bytes.
+
+   WHY THE TOKEN IS NOT IN localStorage. The spec asked for access_token and
+   refresh_token in localStorage. Google does not issue a refresh token to a browser
+   client with no secret — there is nothing durable to store. What is left is a ~1h
+   bearer token, and putting that in localStorage buys under an hour of convenience in
+   exchange for making it readable by any XSS, on an origin that already holds the
+   Anthropic key. So it lives in a module variable and dies with the tab.
+
+   WHY THE SYNC IS MANUAL. That same expiry has no silent renewal. An automatic sync
+   would work for an hour and then quietly stop — precisely the failure that left the
+   backup server off for two days in July with zero POSTs and zero warnings. A button
+   means the token is requested while Diogo is looking at the screen.
+   ---------------------------------------------------------------- */
+
+const GCAL_CLIENT_ID_KEY = 'recall.gcalClientId';
+const GCAL_LAST_SYNC_KEY = 'recall.gcalLastSyncAt';
+const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const GCAL_GIS_SRC = 'https://accounts.google.com/gsi/client';
+const GCAL_API_BASE = 'https://www.googleapis.com/calendar/v3';
+
+let gcalAccessToken = null;      // memory only, dies with the tab — see above
+let gcalScriptPromise = null;
+
+function getGCalClientId() { return localStorage.getItem(GCAL_CLIENT_ID_KEY) || ''; }
+function isGCalConfigured() { return !!getGCalClientId(); }
+function isGCalConnected() { return !!gcalAccessToken; }
+
+function gcalLastSyncAt() {
+  const v = Number(localStorage.getItem(GCAL_LAST_SYNC_KEY));
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/* Google's library, fetched ONLY when Connect is pressed.
+
+   Never at startup and never precached: sw.js must not cache it, or an offline launch
+   would stall on a request that cannot succeed. Syncing needs the network anyway, so
+   loading it lazily costs nothing and keeps the offline guarantee (#26) intact. */
+function loadGisScript() {
+  if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+    return Promise.resolve();
+  }
+  if (gcalScriptPromise) return gcalScriptPromise;
+  gcalScriptPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = GCAL_GIS_SRC;
+    s.async = true;
+    s.defer = true;
+    s.onload = () => resolve();
+    s.onerror = () => {
+      // Cleared so a later retry actually retries instead of reusing the rejection.
+      gcalScriptPromise = null;
+      reject(new Error('gis-unreachable'));
+    };
+    document.head.appendChild(s);
+  });
+  return gcalScriptPromise;
+}
+
+/* Asks Google for an access token. `interactive` false uses an existing Google session
+   silently where possible; the sync path passes true so expiry surfaces as a prompt. */
+function initiateGCalOAuth(interactive) {
+  const clientId = getGCalClientId();
+  if (!clientId) return Promise.reject(new Error('gcal-no-client-id'));
+
+  return loadGisScript().then(() => new Promise((resolve, reject) => {
+    // A fresh client each time: reassigning `callback` on a cached one leaves the
+    // previous promise's resolve reachable and resolves the wrong request.
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: GCAL_SCOPE,
+      callback: resp => {
+        if (resp && resp.access_token) {
+          gcalAccessToken = resp.access_token;
+          resolve(resp.access_token);
+        } else {
+          reject(new Error((resp && resp.error) || 'gcal-denied'));
+        }
+      },
+      error_callback: err => reject(new Error((err && err.type) || 'gcal-denied'))
+    });
+    client.requestAccessToken({ prompt: interactive === false ? '' : 'consent' });
+  }));
+}
+
+function gcalDisconnect() {
+  const token = gcalAccessToken;
+  gcalAccessToken = null;
+  // Best-effort: revoking is courtesy, and failing to revoke must not look like a
+  // failure to disconnect — locally we are disconnected either way.
+  if (token && window.google && window.google.accounts && window.google.accounts.oauth2) {
+    try { window.google.accounts.oauth2.revoke(token, () => {}); } catch (e) { /* ignore */ }
+  }
+  renderGCalPanel();
+}
+
+/* One fetch, one retry on 401. A token can expire mid-sync — between the list and the
+   last write — so a single re-auth is worth it; a second failure is a real failure. */
+async function callGCalAPI(path, options) {
+  if (!gcalAccessToken) await initiateGCalOAuth(false);
+
+  const send = () => fetch(GCAL_API_BASE + path, {
+    ...(options || {}),
+    headers: {
+      'Authorization': 'Bearer ' + gcalAccessToken,
+      'Content-Type': 'application/json',
+      ...((options && options.headers) || {})
+    }
+  });
+
+  let res;
+  try { res = await send(); }
+  catch (e) { throw new Error('gcal-network'); }
+
+  if (res.status === 401) {
+    gcalAccessToken = null;
+    await initiateGCalOAuth(true);
+    try { res = await send(); }
+    catch (e) { throw new Error('gcal-network'); }
+  }
+
+  if (res.status === 204) return null;              // DELETE returns no body
+  if (res.status === 410) return null;              // already gone — deleting it again is a no-op
+  if (!res.ok) {
+    const err = new Error('gcal-http-' + res.status);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/* Step 1 — what IS.
+
+   MUST follow nextPageToken. events.list paginates, and a caller that reads only the
+   first page sees a partial "what IS": every event beyond it looks missing and gets
+   created a SECOND time. That is the duplicate bug this whole marker design exists to
+   prevent, reintroduced by one unhandled field.
+
+   No timeMin, on purpose: an assignment whose deadline passed months ago still has an
+   event that must be found before it can be updated or deleted. */
+async function listRecallEvents() {
+  const out = [];
+  let pageToken = '';
+  do {
+    const qs = 'privateExtendedProperty=' + encodeURIComponent(GCAL_APP_KEY + '=' + GCAL_APP_VALUE)
+      + '&showDeleted=false&maxResults=250'
+      + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    const page = await callGCalAPI('/calendars/primary/events?' + qs, { method: 'GET' });
+    if (page && Array.isArray(page.items)) out.push(...page.items);
+    pageToken = (page && page.nextPageToken) || '';
+  } while (pageToken);
+  return out;
+}
+
+/* Step 4 — execute the plan the pure diff produced, and write back the new ids.
+
+   The write-back reloads the library first rather than reusing the copy read at the
+   top: a sync is many awaits long, and saving a stale snapshot would silently discard
+   anything edited while it ran. */
+async function syncRecallToGoogleCalendar() {
+  const remotes = await listRecallEvents();
+  const plan = diffCalendarEvents(loadData().assignments, remotes);
+  const counts = { created: 0, updated: 0, deleted: 0, skipped: plan.skipped.length };
+  const idPatch = new Map();
+
+  for (const item of plan.toCreate) {
+    const created = await callGCalAPI('/calendars/primary/events', {
+      method: 'POST', body: JSON.stringify(item.event)
+    });
+    if (created && created.id) {
+      idPatch.set(item.assignment.id, created.id);
+      counts.created++;
+    }
+  }
+  for (const item of plan.toUpdate) {
+    await callGCalAPI('/calendars/primary/events/' + encodeURIComponent(item.eventId), {
+      method: 'PATCH', body: JSON.stringify(item.event)
+    });
+    counts.updated++;
+  }
+  for (const item of plan.toDelete) {
+    await callGCalAPI('/calendars/primary/events/' + encodeURIComponent(item.eventId), {
+      method: 'DELETE'
+    });
+    counts.deleted++;
+    // An assignment that lost its due date keeps its row but must lose its stale id,
+    // or the next sync tries to PATCH an event that no longer exists.
+    if (item.assignmentId) idPatch.set(item.assignmentId, null);
+  }
+
+  if (idPatch.size) {
+    const fresh = loadData();
+    saveData({
+      ...fresh,
+      assignments: fresh.assignments.map(a =>
+        idPatch.has(a.id) ? { ...a, gcalEventId: idPatch.get(a.id) } : a)
+    });
+  }
+  localStorage.setItem(GCAL_LAST_SYNC_KEY, String(Date.now()));
+  return counts;
+}
+
+/* ---- the panel on the Assignments screen ---- */
+
+/* Maps a thrown sync error onto something a person can act on. Mirrors apiErrorInfo's
+   split: `retryable` decides whether a Try again button appears at all, because
+   offering a retry that cannot help is worse than not offering one. */
+function gcalErrorInfo(err) {
+  const m = (err && err.message) || '';
+  if (m === 'gcal-no-client-id') {
+    return { message: 'Add a Google client ID in Settings first.', retryable: false };
+  }
+  if (m === 'gis-unreachable' || m === 'gcal-network') {
+    return { message: 'Could not reach Google. Check your connection and try again.', retryable: true };
+  }
+  if (m === 'gcal-denied' || m === 'access_denied' || m === 'popup_closed') {
+    return { message: 'Google did not grant access. Connect again to retry.', retryable: true };
+  }
+  if (err && err.status === 403) {
+    return { message: 'Google refused the request — check the Calendar API is enabled for this client ID.', retryable: false };
+  }
+  if (err && err.status === 429) {
+    return { message: 'Google is rate-limiting this account. Wait a minute, then try again.', retryable: true };
+  }
+  if (err && err.status >= 500) {
+    return { message: 'Google Calendar is having trouble. Try again in a moment.', retryable: true };
+  }
+  return { message: 'Sync failed. Try again.', retryable: true };
+}
+
+/* A feature that is OFF must say so — the rule earned on 2026-07-30, when an
+   unconfigured backup server reported nothing at all and stayed off for two days. */
+function gcalStatusLine() {
+  if (!isGCalConfigured()) return 'Not set up — add a Google client ID in Settings.';
+  if (!isGCalConnected()) return 'Not connected.';
+  const last = gcalLastSyncAt();
+  if (!last) return 'Connected. Not synced yet.';
+  const days = Math.floor((Date.now() - last) / DAY);
+  if (days <= 0) return 'Connected. Synced today.';
+  if (days === 1) return 'Connected. Synced yesterday.';
+  return 'Connected. Synced ' + days + ' days ago.';
+}
+
+function renderGCalPanel() {
+  const el = document.getElementById('gcal-panel');
+  if (!el) return;
+  const connected = isGCalConnected();
+  el.innerHTML =
+    `<div class="gcal-row">` +
+      `<div class="gcal-status" id="gcal-status">${escapeHtml(gcalStatusLine())}</div>` +
+      `<div class="gcal-actions">` +
+        (connected
+          ? `<button class="btn btn-ghost btn-sm" type="button" onclick="gcalDisconnect()">Disconnect</button>` +
+            `<button class="btn btn-outline btn-sm" type="button" onclick="onGCalSync()">Sync now</button>`
+          : `<button class="btn btn-outline btn-sm" type="button" onclick="onGCalConnect()">Connect Google Calendar</button>`) +
+      `</div>` +
+    `</div>`;
+}
+
+function setGCalStatus(msg, kind, retry) {
+  const el = document.getElementById('gcal-status');
+  if (!el) return;
+  el.className = 'gcal-status' + (kind === 'error' ? ' error' : '');
+  if (kind === 'busy') {
+    el.innerHTML = `<span class="spinner"></span> ${escapeHtml(msg)}`;
+    return;
+  }
+  if (kind === 'error' && typeof retry === 'function') {
+    el.innerHTML = `<span class="status-msg">${escapeHtml(msg)}</span>` +
+      `<button class="btn btn-outline btn-sm status-retry" type="button">Try again</button>`;
+    el.querySelector('.status-retry').onclick = retry;
+    return;
+  }
+  el.textContent = msg || '';
+}
+
+async function onGCalConnect() {
+  if (!isGCalConfigured()) {
+    setGCalStatus('Add a Google client ID in Settings first.', 'error');
+    openKeyModal();
+    return;
+  }
+  setGCalStatus('Connecting…', 'busy');
+  try {
+    await initiateGCalOAuth(true);
+    renderGCalPanel();
+    toast('Google Calendar connected');
+  } catch (e) {
+    const info = gcalErrorInfo(e);
+    setGCalStatus(info.message, 'error', info.retryable ? onGCalConnect : null);
+  }
+}
+
+async function onGCalSync() {
+  setGCalStatus('Syncing…', 'busy');
+  try {
+    const counts = await syncRecallToGoogleCalendar();
+    renderGCalPanel();
+    setGCalStatus(summarizeGCalSync(counts), 'ok');
+  } catch (e) {
+    const info = gcalErrorInfo(e);
+    setGCalStatus(info.message, 'error', info.retryable ? onGCalSync : null);
+  }
+}
 
 /* ── 1F. ASSIGNMENTS — CRUD ──────────────────────────────────────
    The impure half. Every write funnels through saveData(), so the #19 write lock
@@ -2090,6 +2654,8 @@ function openKeyModal() {
   document.getElementById('key-error').textContent = '';
   document.getElementById('server-input').value = localStorage.getItem(SERVER_URL_KEY) || '';
   document.getElementById('server-error').textContent = '';
+  document.getElementById('gcal-client-input').value = getGCalClientId();
+  document.getElementById('gcal-client-error').textContent = '';
   // Which code am I actually running? A waiting service worker cannot activate while
   // any tab is still open, so "I pushed the fix" and "I am running the fix" are not
   // the same statement. This makes the difference visible instead of silent.
@@ -2125,6 +2691,20 @@ function onSaveKey() {
   if (change.action === 'remove') localStorage.removeItem(SERVER_URL_KEY);
   document.getElementById('server-error').textContent = '';
 
+  // Saved independently of both the key and the server, for the same reason they are
+  // independent of each other: wanting calendar sync implies nothing about the others.
+  // Validated only for the shape Google actually issues — a wrong value here fails at
+  // Connect with an unreadable Google error, which is a bad place to learn about a typo.
+  const rawClient = document.getElementById('gcal-client-input').value.trim();
+  if (rawClient && !rawClient.endsWith('.apps.googleusercontent.com')) {
+    document.getElementById('gcal-client-error').textContent =
+      'That doesn\'t look like a Google client ID (should end with .apps.googleusercontent.com).';
+    return;
+  }
+  if (rawClient) localStorage.setItem(GCAL_CLIENT_ID_KEY, rawClient);
+  else localStorage.removeItem(GCAL_CLIENT_ID_KEY);
+  document.getElementById('gcal-client-error').textContent = '';
+
   const k = document.getElementById('key-input').value.trim();
   if (k && !k.startsWith('sk-ant-')) {
     document.getElementById('key-error').textContent = 'That doesn\'t look like an Anthropic key (should start with sk-ant-).';
@@ -2134,6 +2714,7 @@ function onSaveKey() {
 
   closeKeyModal();
   renderBackupNudge();
+  renderGCalPanel();
   // Turning backups off is announced, never silent — the notice wins over the generic
   // confirmation, because it is the one thing here worth noticing.
   toast(change.notice || 'Settings saved');
@@ -6610,6 +7191,9 @@ function renderAssignments() {
   document.getElementById('asg-controls').innerHTML =
     assignmentControlsHtml(renderedSubjects, asgSubject, doneCount, asgShowCompleted);
   document.getElementById('assignments-body').innerHTML = assignmentListHtml(shown, ctx);
+  // Rendered here rather than only on screen entry, so adding a client ID in Settings
+  // and coming back shows "Not connected" instead of the stale "Not set up".
+  renderGCalPanel();
 }
 
 /* The Home panel. Hidden entirely — not an empty box — when nothing is open. */

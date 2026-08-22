@@ -182,6 +182,11 @@
       </div>
     </div>
 
+    <!-- Google Calendar sync (feature #33). Static, outside #assignments-body, so a
+         re-render of the list never wipes a "Syncing…" message mid-request — the same
+         reason #asg-sort lives outside it. -->
+    <div id="gcal-panel" class="gcal-panel"></div>
+
     <div id="asg-controls"></div>
     <div id="assignments-body"></div>
   </section>
@@ -676,6 +681,12 @@
       <div class="field-hint">Your decks are copied here so they survive clearing your browser. Leave empty to turn this off — everything else works the same. Runs on this Mac, so it does not reach your phone.</div>
     </div>
     <div class="form-error" id="server-error" style="margin-bottom:8px"></div>
+    <div class="field">
+      <label for="gcal-client-input">Google Calendar client ID (optional)</label>
+      <input id="gcal-client-input" type="text" placeholder="…apps.googleusercontent.com" autocomplete="off" spellcheck="false">
+      <div class="field-hint">Mirrors assignments that have a due date into your Google Calendar, one way, when you press Sync. Create an OAuth client ID (type: Web application) in Google Cloud Console and allow this exact address as an origin. Leave empty to turn this off.</div>
+    </div>
+    <div class="form-error" id="gcal-client-error" style="margin-bottom:8px"></div>
     <div class="field-hint" id="build-id-line" style="margin-bottom:8px"></div>
     <div class="modal-actions">
       <button class="btn btn-danger-ghost" onclick="onClearKey()">Remove key</button>

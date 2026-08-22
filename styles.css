@@ -784,3 +784,23 @@ li.tl-item:last-child{padding-bottom:0}
 /* Offline-readiness shortfall in Settings (feature #26). Warning colour, not error:
    an incomplete cache is worth knowing about, not alarming. */
 .field-hint-warn{color:var(--warning);font-weight:500}
+
+/* Google Calendar sync panel (feature #33).
+
+   Deliberately quiet: it borrows .backup-nudge.quiet's register — borderless,
+   --ink-3, small — because a sync status is ambient information, not a call to
+   action. It sits directly under the page head, above the filter chips, and must
+   not compete with "+ New assignment" for attention.
+
+   No colour carries meaning here. Connected and not-connected differ by WORDS, not
+   by a green or grey dot: the palette is monochrome, and a status a colour-blind
+   reader cannot parse is not a status. The one exception is the error state, which
+   reuses --error exactly like every other failure in the app. */
+.gcal-panel{margin-bottom:18px}
+.gcal-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  border-bottom:1px solid var(--border);padding:0 0 12px}
+.gcal-status{flex:1;min-width:220px;display:flex;align-items:center;gap:10px;
+  flex-wrap:wrap;color:var(--ink-3);font-size:12.5px;line-height:1.5}
+.gcal-status.error{color:var(--error)}
+.gcal-status .status-msg{flex:1;min-width:180px}
+.gcal-actions{display:flex;gap:8px;flex-wrap:wrap}
