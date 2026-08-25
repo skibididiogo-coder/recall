@@ -1,0 +1,14 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",       "x": 0,    "y": 0,    "w": 1440, "h": 5400, "title": "Site — desktop", "print": "flow" },
+    { "file": "Mobile.dc.html",     "x": 1560, "y": 0,    "w": 390,  "h": 844,  "title": "Site — telemóvel" },
+    { "file": "Marca.dc.html",      "x": 0,    "y": 5560, "w": 1120, "h": 800,  "title": "Marca" },
+    { "file": "Tipografia.dc.html", "x": 1240, "y": 5560, "w": 1120, "h": 800,  "title": "Tipografia" },
+    { "file": "Cores.dc.html",      "x": 2480, "y": 5560, "w": 1120, "h": 800,  "title": "Cores" }
+  ],
+  "annotations": [
+    { "id": "placeholders", "x": 0, "y": -230, "w": 620, "text": "Tudo o que está entre [parênteses retos] são dados por confirmar com a Janine: morada, telemóvel, email, número de cédula da Ordem dos Psicólogos, preços, formação e escalão etário.\n\nA frase em itálico na secção «Sobre» é uma proposta minha — deve ser aprovada ou substituída por ela." },
+    { "id": "kit-marca", "x": 2080, "y": 0, "w": 300, "text": "Os três painéis em baixo são o kit de marca: logótipo, letras e cores.\n\nÉ o que se entrega a quem for construir o site." }
+  ],
+  "launch": { "view": "canvas" }
+}

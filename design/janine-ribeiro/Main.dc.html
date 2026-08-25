@@ -1,0 +1,398 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600;700&family=Figtree:wght@400;500;600;700&display=swap">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #FBF6EE;
+      color: #362B23;
+      font-family: Figtree, "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    a { color: #8D4826; text-decoration: none; }
+    a:hover { color: #A35C3A; text-decoration: underline; }
+    p { margin: 0; }
+    h1, h2, h3, h4 { margin: 0; font-family: Faustina, Georgia, "Times New Roman", serif; font-weight: 600; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; background: #FBF6EE;">
+
+  <!-- ============ NAVEGACAO ============ -->
+  <header style="display: flex; align-items: center; justify-content: space-between; gap: 40px; max-width: 1240px; margin: 0 auto; padding: 26px 40px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <svg width="34" height="38" viewBox="0 0 34 38" fill="none" aria-hidden="true">
+        <path d="M2 36V17a15 15 0 0 1 30 0v19" stroke="#A35C3A" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="17" cy="16" r="5" fill="#6BAC74"/>
+      </svg>
+      <div style="display: flex; flex-direction: column; gap: 1px;">
+        <span style="font-family: Faustina, Georgia, serif; font-size: 21px; font-weight: 600; letter-spacing: -0.01em; color: #362B23;">Janine Ribeiro</span>
+        <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #72675D;">Psicologia infantil</span>
+      </div>
+    </div>
+    <nav style="display: flex; align-items: center; gap: 34px;">
+      <span style="font-size: 15px; color: #72675D;">Sobre</span>
+      <span style="font-size: 15px; color: #72675D;">Consultas</span>
+      <span style="font-size: 15px; color: #72675D;">Como funciona</span>
+      <span style="font-size: 15px; color: #72675D;">Contactos</span>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <span style="display: inline-flex; align-items: center; gap: 9px; background: #A35C3A; color: #FFFFFF; font-size: 15px; font-weight: 600; padding: 14px 24px; border-radius: 999px;">
+        Marcar consulta
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+      </span>
+    </div>
+  </header>
+
+  <!-- ============ HERO ============ -->
+  <section style="max-width: 1240px; margin: 0 auto; padding: 56px 40px 88px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 64px; align-items: center;">
+    <div style="display: flex; flex-direction: column; gap: 26px;">
+      <p style="font-size: 13px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #8D4826;">Consultório em [CIDADE] &amp; online</p>
+      <h1 style="font-size: 62px; line-height: 1.06; letter-spacing: -0.02em; color: #362B23; text-wrap: balance;">Cada criança tem o seu ritmo — aqui há espaço para ele.</h1>
+      <p style="font-size: 19px; line-height: 1.62; color: #72675D; max-width: 480px; text-wrap: pretty;">Consultas de psicologia para crianças e apoio a pais. Começamos por perceber o que está a acontecer — sem pressa, sem diagnósticos apressados e sem julgamento.</p>
+      <div style="display: flex; align-items: center; gap: 14px; margin-top: 6px;">
+        <span style="display: inline-flex; align-items: center; gap: 10px; background: #A35C3A; color: #FFFFFF; font-size: 16px; font-weight: 600; padding: 17px 30px; border-radius: 999px;">
+          Marcar primeira consulta
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+        </span>
+        <span style="display: inline-flex; align-items: center; background: transparent; color: #362B23; border: 1px solid #DCCFBF; font-size: 16px; font-weight: 500; padding: 16px 28px; border-radius: 999px;">Ver como funciona</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; margin-top: 2px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6BAC74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+        <span style="font-size: 15px; color: #72675D;">Primeira chamada de 15 minutos sem custo.</span>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: center;">
+      <svg width="520" height="560" viewBox="0 0 520 560" fill="none" aria-hidden="true">
+        <circle cx="452" cy="96" r="64" fill="#DFF3E1"/>
+        <path d="M0 540V260a260 260 0 0 1 520 0v280q0 20-20 20H20q-20 0-20-20Z" fill="#F4EBE0"/>
+        <circle cx="356" cy="196" r="56" fill="#F9CCB8"/>
+        <path d="M0 442q130-72 260-14t260-16v128q0 20-20 20H20q-20 0-20-20Z" fill="#BFE3C2"/>
+        <path d="M0 486q140-56 260-8t260-20v82q0 20-20 20H20q-20 0-20-20Z" fill="#6BAC74" opacity="0.55"/>
+        <rect x="186" y="292" width="84" height="196" rx="42" fill="#D08462"/>
+        <circle cx="228" cy="262" r="32" fill="#D08462"/>
+        <rect x="292" y="378" width="62" height="110" rx="31" fill="#34613B"/>
+        <circle cx="323" cy="354" r="24" fill="#34613B"/>
+        <path d="M270 400q28-16 34 6" stroke="#A35C3A" stroke-width="7" stroke-linecap="round"/>
+        <path d="M118 104 96 148l26 40 40-26-18-46-26-12Z" fill="#A35C3A"/>
+        <path d="M122 188q-14 26 6 40t4 40" stroke="#A35C3A" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="96" cy="252" r="7" fill="#D08462"/>
+        <circle cx="424" cy="300" r="10" fill="#F9CCB8"/>
+        <circle cx="70" cy="330" r="5" fill="#6BAC74"/>
+      </svg>
+    </div>
+  </section>
+
+  <!-- ============ FAIXA DE CONFIANCA ============ -->
+  <section style="border-top: 1px solid #E8DCCD; border-bottom: 1px solid #E8DCCD; background: #F4EBE0;">
+    <div style="max-width: 1240px; margin: 0 auto; padding: 26px 40px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8.4 8 9 4.6-.6 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+        <span style="font-size: 15px; color: #72675D;">Ordem dos Psicólogos Portugueses · cédula <strong style="color: #362B23; font-weight: 600;">[N.º]</strong></span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span style="font-size: 15px; color: #72675D;">Presencial em <strong style="color: #362B23; font-weight: 600;">[MORADA, CIDADE]</strong> e por videochamada</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M15.5 19a4 4 0 0 1 5-3.6"/></svg>
+        <span style="font-size: 15px; color: #72675D;">Crianças dos <strong style="color: #362B23; font-weight: 600;">[3]</strong> aos <strong style="color: #362B23; font-weight: 600;">[12]</strong> anos e respetivas famílias</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ E PARA NOS? ============ -->
+  <section style="max-width: 1240px; margin: 0 auto; padding: 88px 40px;">
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 72px; align-items: start;">
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        <p style="font-size: 13px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #8D4826;">É para nós?</p>
+        <h2 style="font-size: 40px; line-height: 1.14; letter-spacing: -0.015em; color: #362B23; text-wrap: balance;">A maioria dos pais chega aqui com uma destas dúvidas</h2>
+        <p style="font-size: 17px; line-height: 1.65; color: #72675D; text-wrap: pretty;">Se se reviu em alguma, vale a pena conversarmos. Nem todas as situações precisam de acompanhamento — às vezes uma consulta chega para arrumar as ideias e devolver alguma calma a casa.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; align-items: flex-start; gap: 14px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 16px; padding: 18px 20px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6BAC74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <span style="font-size: 16px; line-height: 1.5; color: #362B23;">Chora ou faz birras de uma forma que já não parece da idade</span>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 14px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 16px; padding: 18px 20px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6BAC74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <span style="font-size: 16px; line-height: 1.5; color: #362B23;">Anda ansioso, ganhou medos novos ou custa-lhe adormecer</span>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 14px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 16px; padding: 18px 20px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6BAC74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <span style="font-size: 16px; line-height: 1.5; color: #362B23;">A escola diz que não se concentra ou que anda diferente</span>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 14px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 16px; padding: 18px 20px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6BAC74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <span style="font-size: 16px; line-height: 1.5; color: #362B23;">Não fala do que sente — ou fala, e não sabemos o que responder</span>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 14px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 16px; padding: 18px 20px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6BAC74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <span style="font-size: 16px; line-height: 1.5; color: #362B23;">A família passou por uma separação, uma perda ou uma mudança grande</span>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 14px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 16px; padding: 18px 20px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6BAC74" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px;" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+          <span style="font-size: 16px; line-height: 1.5; color: #362B23;">Está tudo bem — só queremos perceber melhor o nosso filho</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CONSULTAS ============ -->
+  <section style="background: #F4EBE0; border-top: 1px solid #E8DCCD; border-bottom: 1px solid #E8DCCD;">
+    <div style="max-width: 1240px; margin: 0 auto; padding: 88px 40px;">
+      <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 48px; margin-bottom: 44px;">
+        <div style="display: flex; flex-direction: column; gap: 18px; max-width: 620px;">
+          <p style="font-size: 13px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #8D4826;">Consultas</p>
+          <h2 style="font-size: 40px; line-height: 1.14; letter-spacing: -0.015em; color: #362B23; text-wrap: balance;">Quatro formas de trabalhar convosco</h2>
+        </div>
+        <p style="font-size: 16px; line-height: 1.6; color: #72675D; max-width: 330px;">Na chamada inicial decidimos juntos por onde começar. Nem sempre é pela criança.</p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px;">
+        <div style="display: flex; flex-direction: column; gap: 16px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 24px; padding: 34px;">
+          <div style="display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 999px; background: #FCE8E0;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7l-4-4Z"/><path d="M14 3v4h5"/><path d="M9 13h6"/><path d="M9 17h4"/></svg>
+          </div>
+          <h3 style="font-size: 24px; line-height: 1.25; color: #362B23;">Avaliação psicológica</h3>
+          <p style="font-size: 16px; line-height: 1.62; color: #72675D; text-wrap: pretty;">Entrevistas, observação e provas adequadas à idade, para perceber o que está por trás do que se vê. Termina sempre com um relatório escrito e uma conversa em que explico tudo por palavras simples.</p>
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px; padding-top: 16px; border-top: 1px solid #EDE2D4;">
+            <span style="font-size: 14px; font-weight: 600; color: #362B23;">[3 a 4] sessões</span>
+            <span style="width: 4px; height: 4px; border-radius: 999px; background: #DCCFBF;"></span>
+            <span style="font-size: 14px; color: #72675D;">[PREÇO] €</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 24px; padding: 34px;">
+          <div style="display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 999px; background: #DFF3E1;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34613B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7.5-4.7-7.5-10.2A4.3 4.3 0 0 1 12 8.2a4.3 4.3 0 0 1 7.5 2.6C19.5 16.3 12 21 12 21Z"/></svg>
+          </div>
+          <h3 style="font-size: 24px; line-height: 1.25; color: #362B23;">Acompanhamento da criança</h3>
+          <p style="font-size: 16px; line-height: 1.62; color: #72675D; text-wrap: pretty;">Sessões regulares em que o jogo, o desenho e a conversa dão forma ao que a criança ainda não consegue dizer por palavras. O plano é revisto convosco de [X] em [X] semanas.</p>
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px; padding-top: 16px; border-top: 1px solid #EDE2D4;">
+            <span style="font-size: 14px; font-weight: 600; color: #362B23;">50 min</span>
+            <span style="width: 4px; height: 4px; border-radius: 999px; background: #DCCFBF;"></span>
+            <span style="font-size: 14px; color: #72675D;">[PREÇO] €</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 24px; padding: 34px;">
+          <div style="display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 999px; background: #FCE8E0;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><circle cx="17" cy="9.5" r="2.4"/><path d="M3 19a6 6 0 0 1 12 0"/><path d="M16 19a4.2 4.2 0 0 1 5-3.9"/></svg>
+          </div>
+          <h3 style="font-size: 24px; line-height: 1.25; color: #362B23;">Consulta de parentalidade</h3>
+          <p style="font-size: 16px; line-height: 1.62; color: #72675D; text-wrap: pretty;">Uma consulta só para pais. Trazem uma situação concreta — sono, birras, limites, ecrãs, irmãos — e saem com estratégias pensadas para a vossa casa, não para um manual.</p>
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px; padding-top: 16px; border-top: 1px solid #EDE2D4;">
+            <span style="font-size: 14px; font-weight: 600; color: #362B23;">50 min</span>
+            <span style="width: 4px; height: 4px; border-radius: 999px; background: #DCCFBF;"></span>
+            <span style="font-size: 14px; color: #72675D;">[PREÇO] €</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 24px; padding: 34px;">
+          <div style="display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; border-radius: 999px; background: #DFF3E1;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#34613B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 12 4l9 4.5-9 4.5-9-4.5Z"/><path d="M7 11v5c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5v-5"/><path d="M21 8.5V15"/></svg>
+          </div>
+          <h3 style="font-size: 24px; line-height: 1.25; color: #362B23;">Articulação com a escola</h3>
+          <p style="font-size: 16px; line-height: 1.62; color: #72675D; text-wrap: pretty;">Com a vossa autorização, falo com educadores e professores e ajudo a construir as adaptações necessárias — para que a criança encontre a mesma resposta em casa e na sala de aula.</p>
+          <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px; padding-top: 16px; border-top: 1px solid #EDE2D4;">
+            <span style="font-size: 14px; font-weight: 600; color: #362B23;">Sob marcação</span>
+            <span style="width: 4px; height: 4px; border-radius: 999px; background: #DCCFBF;"></span>
+            <span style="font-size: 14px; color: #72675D;">[PREÇO] €</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMO FUNCIONA ============ -->
+  <section style="max-width: 1240px; margin: 0 auto; padding: 88px 40px;">
+    <div style="display: flex; flex-direction: column; gap: 18px; max-width: 640px; margin-bottom: 48px;">
+      <p style="font-size: 13px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #8D4826;">Como funciona</p>
+      <h2 style="font-size: 40px; line-height: 1.14; letter-spacing: -0.015em; color: #362B23; text-wrap: balance;">Do primeiro telefonema à primeira sessão</h2>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px;">
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <span style="font-family: Faustina, Georgia, serif; font-size: 15px; font-weight: 600; color: #A35C3A;">01</span>
+          <span style="flex-grow: 1; height: 1px; background: #E8DCCD;"></span>
+        </div>
+        <h3 style="font-size: 21px; line-height: 1.28; color: #362B23;">Chamada inicial</h3>
+        <p style="font-size: 15px; line-height: 1.62; color: #72675D; text-wrap: pretty;">Quinze minutos ao telefone, sem custo, para me contar o que a preocupa e percebermos se faço sentido para a vossa família.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <span style="font-family: Faustina, Georgia, serif; font-size: 15px; font-weight: 600; color: #A35C3A;">02</span>
+          <span style="flex-grow: 1; height: 1px; background: #E8DCCD;"></span>
+        </div>
+        <h3 style="font-size: 21px; line-height: 1.28; color: #362B23;">Consulta só com os pais</h3>
+        <p style="font-size: 15px; line-height: 1.62; color: #72675D; text-wrap: pretty;">A história da criança, o que já tentaram e o que esperam. A criança não vem a esta sessão — este tempo é vosso.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <span style="font-family: Faustina, Georgia, serif; font-size: 15px; font-weight: 600; color: #A35C3A;">03</span>
+          <span style="flex-grow: 1; height: 1px; background: #E8DCCD;"></span>
+        </div>
+        <h3 style="font-size: 21px; line-height: 1.28; color: #362B23;">Encontro com a criança</h3>
+        <p style="font-size: 15px; line-height: 1.62; color: #72675D; text-wrap: pretty;">No consultório, ao ritmo dela. Brincamos, desenhamos, conversamos — ninguém é obrigado a falar logo no primeiro dia.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="display: flex; align-items: center; gap: 14px;">
+          <span style="font-family: Faustina, Georgia, serif; font-size: 15px; font-weight: 600; color: #A35C3A;">04</span>
+          <span style="flex-grow: 1; height: 1px; background: #E8DCCD;"></span>
+        </div>
+        <h3 style="font-size: 21px; line-height: 1.28; color: #362B23;">Plano e revisões</h3>
+        <p style="font-size: 15px; line-height: 1.62; color: #72675D; text-wrap: pretty;">Proponho um caminho com objetivos claros e revemo-lo convosco regularmente. Se deixar de fazer sentido, digo-vos.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SOBRE ============ -->
+  <section style="background: #F4EBE0; border-top: 1px solid #E8DCCD; border-bottom: 1px solid #E8DCCD;">
+    <div style="max-width: 1240px; margin: 0 auto; padding: 88px 40px; display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: 72px; align-items: center;">
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; width: 420px; height: 500px; background: #FBF6EE; border: 1px dashed #DCCFBF; border-radius: 210px 210px 28px 28px;">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#7D7269" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z"/><circle cx="12" cy="12.5" r="3.6"/></svg>
+        <span style="font-size: 14px; font-weight: 600; letter-spacing: 0.06em; color: #72675D;">[FOTOGRAFIA DA JANINE]</span>
+        <span style="font-size: 13px; color: #72675D;">retrato vertical, 840 × 1000 px</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        <p style="font-size: 13px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #8D4826;">Sobre</p>
+        <h2 style="font-size: 40px; line-height: 1.14; letter-spacing: -0.015em; color: #362B23;">Sou a Janine Ribeiro.</h2>
+        <p style="font-size: 17px; line-height: 1.68; color: #72675D; max-width: 620px; text-wrap: pretty;">Sou psicóloga clínica e trabalho com crianças e famílias há [X] anos. Licenciei-me em [UNIVERSIDADE] e fiz formação em [ABORDAGEM / ESPECIALIZAÇÃO]. Recebo em [MORADA, CIDADE] e também acompanho famílias por videochamada.</p>
+        <p style="font-size: 17px; line-height: 1.68; color: #72675D; max-width: 620px; text-wrap: pretty;">Trabalho de uma forma simples: a criança precisa de se sentir segura antes de qualquer outra coisa acontecer, e os pais precisam de perceber o que se passa. Por isso as consultas incluem-vos sempre — não acompanho o vosso filho às escondidas.</p>
+        <blockquote style="margin: 8px 0 0; padding: 24px 28px; background: #FBF6EE; border-left: 3px solid #D08462; border-radius: 0 18px 18px 0; max-width: 620px;">
+          <p style="font-family: Faustina, Georgia, serif; font-size: 23px; line-height: 1.42; font-style: italic; color: #362B23; text-wrap: pretty;">“Não há crianças difíceis. Há crianças com dificuldades que ainda não têm palavras.”</p>
+        </blockquote>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px;">
+          <span style="font-size: 14px; font-weight: 500; color: #72675D; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 999px; padding: 9px 16px;">Cédula OPP [N.º]</span>
+          <span style="font-size: 14px; font-weight: 500; color: #72675D; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 999px; padding: 9px 16px;">[FORMAÇÃO 1]</span>
+          <span style="font-size: 14px; font-weight: 500; color: #72675D; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 999px; padding: 9px 16px;">[FORMAÇÃO 2]</span>
+          <span style="font-size: 14px; font-weight: 500; color: #72675D; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 999px; padding: 9px 16px;">[ACORDO / SEGURO DE SAÚDE]</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MARCACAO ============ -->
+  <section style="max-width: 1240px; margin: 0 auto; padding: 88px 40px;">
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 64px; align-items: start;">
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        <p style="font-size: 13px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #8D4826;">Marcações</p>
+        <h2 style="font-size: 40px; line-height: 1.14; letter-spacing: -0.015em; color: #362B23; text-wrap: balance;">Vamos começar por uma conversa.</h2>
+        <p style="font-size: 17px; line-height: 1.68; color: #72675D; max-width: 480px; text-wrap: pretty;">Escreva-me o que a preocupa, com as palavras que lhe saírem. Respondo pessoalmente, normalmente em [X] dias úteis.</p>
+        <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 8px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a12 12 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1.1 1A16 16 0 0 1 4 5.1 1 1 0 0 1 5 4Z"/></svg>
+            <span style="font-size: 17px; color: #362B23;">[+351 000 000 000]</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>
+            <span style="font-size: 17px; color: #362B23;">[geral@janineribeiro.pt]</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+            <span style="font-size: 17px; color: #362B23;">[Rua Exemplo, n.º 00, 0000-000 CIDADE]</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8D4826" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/></svg>
+            <span style="font-size: 17px; color: #362B23;">[Segunda a sexta, 9h – 19h]</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 18px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 28px; padding: 38px;">
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;">
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: #72675D;">O seu nome</label>
+            <div style="height: 52px; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 14px;"></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: #72675D;">Telemóvel</label>
+            <div style="height: 52px; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 14px;"></div>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;">
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: #72675D;">Email</label>
+            <div style="height: 52px; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 14px;"></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: #72675D;">Idade da criança</label>
+            <div style="display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 16px; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 14px;">
+              <span style="font-size: 15px; color: #7D7269;">Selecionar</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7D7269" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label style="font-size: 13px; font-weight: 600; letter-spacing: 0.04em; color: #72675D;">O que a preocupa?</label>
+          <div style="height: 122px; padding: 15px 16px; background: #FBF6EE; border: 1px solid #E8DCCD; border-radius: 14px;">
+            <span style="font-size: 15px; line-height: 1.5; color: #7D7269;">Conte-me pelas suas palavras. Não é preciso ter tudo claro.</span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 12px; margin-top: 2px;">
+          <span style="flex-shrink: 0; width: 20px; height: 20px; margin-top: 2px; background: #FBF6EE; border: 1px solid #DCCFBF; border-radius: 6px;"></span>
+          <span style="font-size: 13px; line-height: 1.55; color: #72675D;">Autorizo o contacto sobre este pedido. Os dados são tratados ao abrigo do RGPD e do sigilo profissional.</span>
+        </div>
+        <span style="display: inline-flex; align-items: center; justify-content: center; gap: 10px; margin-top: 6px; height: 56px; background: #A35C3A; color: #FFFFFF; font-size: 16px; font-weight: 600; border-radius: 999px;">
+          Enviar pedido
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RODAPE ============ -->
+  <footer style="background: #2A2119; color: #FBF6EE;">
+    <div style="max-width: 1240px; margin: 0 auto; padding: 60px 40px 36px; display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 48px;">
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <svg width="30" height="34" viewBox="0 0 34 38" fill="none" aria-hidden="true">
+            <path d="M2 36V17a15 15 0 0 1 30 0v19" stroke="#F9CCB8" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="17" cy="16" r="5" fill="#6BAC74"/>
+          </svg>
+          <span style="font-family: Faustina, Georgia, serif; font-size: 20px; font-weight: 600; color: #FBF6EE;">Janine Ribeiro</span>
+        </div>
+        <p style="font-size: 15px; line-height: 1.6; color: #C4B6A6; max-width: 280px;">Psicologia infantil e apoio à parentalidade, em [CIDADE] e online.</p>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #A69D94;">Site</span>
+        <span style="font-size: 15px; color: #C4B6A6;">Sobre</span>
+        <span style="font-size: 15px; color: #C4B6A6;">Consultas</span>
+        <span style="font-size: 15px; color: #C4B6A6;">Como funciona</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #A69D94;">Contactos</span>
+        <span style="font-size: 15px; color: #C4B6A6;">[+351 000 000 000]</span>
+        <span style="font-size: 15px; color: #C4B6A6;">[geral@janineribeiro.pt]</span>
+        <span style="font-size: 15px; color: #C4B6A6;">[Rua Exemplo, CIDADE]</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: #A69D94;">Legal</span>
+        <span style="font-size: 15px; color: #C4B6A6;">Política de Privacidade</span>
+        <span style="font-size: 15px; color: #C4B6A6;">Termos e condições</span>
+        <span style="font-size: 15px; color: #C4B6A6;">Livro de Reclamações</span>
+      </div>
+    </div>
+    <div style="max-width: 1240px; margin: 0 auto; padding: 22px 40px 40px; border-top: 1px solid #453A30; display: flex; align-items: center; justify-content: space-between; gap: 24px;">
+      <span style="font-size: 13px; color: #A69D94;">© 2026 Janine Ribeiro · Cédula OPP [N.º] · NIF [000 000 000]</span>
+      <span style="font-size: 13px; color: #A69D94;">Sigilo profissional garantido em todas as consultas.</span>
+    </div>
+  </footer>
+
+</div>
+</x-dc>
+</body>
+</html>

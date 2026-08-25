@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Faustina:wght@400;500;600;700&family=Figtree:wght@400;500;600;700&display=swap">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #FBF6EE; color: #362B23; font-family: Figtree, "Avenir Next", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #8D4826; text-decoration: none; }
+    a:hover { color: #A35C3A; text-decoration: underline; }
+    p { margin: 0; }
+    h1, h2, h3 { margin: 0; font-family: Faustina, Georgia, "Times New Roman", serif; font-weight: 600; }
+  </style>
+</helmet>
+
+<div style="width: 1120px; height: 800px; background: #FBF6EE; padding: 56px; display: flex; flex-direction: column; gap: 22px;">
+
+  <div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 40px;">
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <p style="font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: #8D4826;">02 · Tipografia</p>
+      <h2 style="font-size: 38px; line-height: 1.1; letter-spacing: -0.015em; color: #362B23;">As letras</h2>
+    </div>
+    <p style="font-size: 15px; line-height: 1.6; color: #72675D; max-width: 400px; text-align: right;">Uma serifada humanista para os títulos, uma sem serifa arredondada para o resto. Ambas gratuitas no Google Fonts.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px;">
+    <div style="display: flex; flex-direction: column; gap: 14px; height: 300px; padding: 30px 34px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 24px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 20px;">
+        <span style="font-family: Faustina, Georgia, serif; font-size: 96px; font-weight: 600; line-height: 1; color: #A35C3A;">Aa</span>
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #72675D;">Títulos</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="font-family: Faustina, Georgia, serif; font-size: 26px; font-weight: 600; color: #362B23;">Faustina</span>
+        <span style="font-size: 14px; color: #72675D;">Regular 400 · Medium 500 · SemiBold 600</span>
+      </div>
+      <span style="height: 1px; background: #EDE2D4;"></span>
+      <span style="font-family: Faustina, Georgia, serif; font-size: 21px; line-height: 1.35; color: #72675D;">Aa Bb Cc Dd Ee ãçõáê 0123456789</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px; height: 300px; padding: 30px 34px; background: #FFFCF7; border: 1px solid #EDE2D4; border-radius: 24px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 20px;">
+        <span style="font-size: 96px; font-weight: 500; line-height: 1; letter-spacing: -0.02em; color: #6BAC74;">Aa</span>
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #72675D;">Texto e interface</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="font-size: 26px; font-weight: 600; letter-spacing: -0.01em; color: #362B23;">Figtree</span>
+        <span style="font-size: 14px; color: #72675D;">Regular 400 · Medium 500 · SemiBold 600</span>
+      </div>
+      <span style="height: 1px; background: #EDE2D4;"></span>
+      <span style="font-size: 21px; line-height: 1.35; color: #72675D;">Aa Bb Cc Dd Ee ãçõáê 0123456789</span>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; flex-shrink: 0; background: #F4EBE0; border: 1px solid #E8DCCD; border-radius: 24px; padding: 8px 30px;">
+    <div style="display: grid; grid-template-columns: 190px minmax(0, 1fr) 130px; gap: 24px; align-items: center; padding: 15px 0; border-bottom: 1px solid #E8DCCD;">
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #72675D;">Título de página</span>
+      <span style="font-family: Faustina, Georgia, serif; font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; color: #362B23;">Cada criança tem o seu ritmo</span>
+      <span style="font-size: 13px; color: #72675D; text-align: right;">62 / 1.06</span>
+    </div>
+    <div style="display: grid; grid-template-columns: 190px minmax(0, 1fr) 130px; gap: 24px; align-items: center; padding: 15px 0; border-bottom: 1px solid #E8DCCD;">
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #72675D;">Título de secção</span>
+      <span style="font-family: Faustina, Georgia, serif; font-size: 26px; font-weight: 600; line-height: 1; letter-spacing: -0.015em; color: #362B23;">Quatro formas de trabalhar convosco</span>
+      <span style="font-size: 13px; color: #72675D; text-align: right;">40 / 1.14</span>
+    </div>
+    <div style="display: grid; grid-template-columns: 190px minmax(0, 1fr) 130px; gap: 24px; align-items: center; padding: 15px 0; border-bottom: 1px solid #E8DCCD;">
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #72675D;">Cartão</span>
+      <span style="font-family: Faustina, Georgia, serif; font-size: 20px; font-weight: 600; line-height: 1; color: #362B23;">Consulta de parentalidade</span>
+      <span style="font-size: 13px; color: #72675D; text-align: right;">24 / 1.25</span>
+    </div>
+    <div style="display: grid; grid-template-columns: 190px minmax(0, 1fr) 130px; gap: 24px; align-items: center; padding: 15px 0; border-bottom: 1px solid #E8DCCD;">
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #72675D;">Corpo</span>
+      <span style="font-size: 16px; line-height: 1.5; color: #72675D;">Começamos por perceber o que está a acontecer, sem pressa.</span>
+      <span style="font-size: 13px; color: #72675D; text-align: right;">17 / 1.65</span>
+    </div>
+    <div style="display: grid; grid-template-columns: 190px minmax(0, 1fr) 130px; gap: 24px; align-items: center; padding: 15px 0;">
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #72675D;">Etiqueta</span>
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase; color: #8D4826;">Consultório em Lisboa &amp; online</span>
+      <span style="font-size: 13px; color: #72675D; text-align: right;">13 / 0.15em</span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>
