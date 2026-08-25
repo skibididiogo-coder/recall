@@ -817,3 +817,34 @@ li.tl-item:last-child{padding-bottom:0}
 .gcal-status.error{color:var(--error)}
 .gcal-status .status-msg{flex:1;min-width:180px}
 .gcal-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Pomodoro focus timer (feature #34).
+
+   Sits in the middle of .review-head, between the deck name and the position counter,
+   on Study, Cram and Quiz. Deliberately quiet: the card is the subject of that screen
+   and a timer that competes with it is a timer that interrupts studying to be looked at.
+
+   State is carried by the WORD [FOCUS] / [BREAK], never by colour alone — the palette
+   is monochrome, and a state a colour-blind reader cannot parse is not a state. The
+   clock is the mono face already used by .review-pos, so it reads as the same family
+   of information rather than a new widget. */
+.pomodoro-slot{display:flex;align-items:center;gap:10px}
+.pomo-state{font-size:10px;font-weight:500;letter-spacing:0.1em;color:var(--ink-3);
+  font-family:var(--font-mono)}
+.pomo-clock{font-size:13px;color:var(--ink-2);font-family:var(--font-mono);
+  /* Tabular figures: without them the clock reflows on every tick as digit widths
+     change, and the buttons beside it visibly jitter once a second. */
+  font-variant-numeric:tabular-nums;min-width:5ch;text-align:center}
+.pomo-btn{background:none;border:1px solid var(--border);border-radius:var(--r);
+  color:var(--ink-2);cursor:pointer;font-size:11px;line-height:1;padding:5px 8px;
+  transition:background 120ms,color 120ms,border-color 120ms}
+.pomo-btn:hover{background:var(--surface-1);color:var(--ink);border-color:var(--ink-3)}
+.pomo-btn:active{transform:translateY(1px)}
+.pomo-btn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+/* Under ~520px the head has a deck name, a timer and a counter competing for one row.
+   The timer wraps to its own line rather than crushing the other two. */
+@media (max-width:520px){
+  .review-head{flex-wrap:wrap;gap:8px}
+  .pomodoro-slot{order:3;width:100%;justify-content:flex-start}
+}

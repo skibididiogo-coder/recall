@@ -87,6 +87,18 @@ function normalizeGcalEventId(v) {
   return typeof v === 'string' && v ? v : null;
 }
 
+/* `pomodoros` (feature #34) is a FIFTH top-level key. A missing one must read as {},
+   never undefined — every counter that reads it would otherwise throw or produce NaN.
+   Arrays are rejected too: typeof [] is 'object', and an array here would accept
+   numeric day keys and silently lose them on the next write.
+
+   Defined HERE in 1B, next to parseSavedData, for the same reason normalizeGcalEventId
+   is: (C) test-backup.mjs and (C) test-migration.mjs evaluate only the 1B slice, so a
+   helper defined further down is not in scope for the functions below that call it. */
+function normalizePomodoros(v) {
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+}
+
 function normalizeAssignmentsForGcal(list) {
   return (Array.isArray(list) ? list : [])
     .map(a => (a ? { ...a, gcalEventId: normalizeGcalEventId(a.gcalEventId) } : a));
@@ -95,7 +107,7 @@ function normalizeAssignmentsForGcal(list) {
 function parseSavedData(raw) {
   // No key at all = a genuinely new install. Empty, but not a fault.
   if (raw === null || raw === undefined || raw === '') {
-    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [], gamification: null } };
+    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [], gamification: null, pomodoros: {} } };
   }
 
   let parsed;
@@ -124,6 +136,8 @@ function parseSavedData(raw) {
       // Rebuild site 2. normalizeAssignmentsForGcal backfills gcalEventId: null on
       // any assignment saved before #33 — see check E2 in (C) test-gcal.mjs.
       assignments: normalizeAssignmentsForGcal(parsed.assignments),
+      // Rebuild site 2 (feature #34).
+      pomodoros: normalizePomodoros(parsed.pomodoros),
       // `gamification` (feature #32) is the newest field and follows the same rule as
       // assignments: anything unusable degrades to null and is rebuilt by
       // normalizeGamification in loadData. It must NEVER make an older save
@@ -226,7 +240,10 @@ function parseBackupFile(raw) {
       // Rebuild site 5. A backup written before #33 has no gcalEventId; a backup
       // written after it carries real ones that MUST survive, or restoring
       // duplicates every event on the next sync. Checks E4 and E6.
-      assignments: normalizeAssignmentsForGcal(incoming.assignments)
+      assignments: normalizeAssignmentsForGcal(incoming.assignments),
+      // Rebuild site 5 (feature #34). A pre-#34 backup has no pomodoros and must still
+      // import; a post-#34 one carries real counts that must survive the restore.
+      pomodoros: normalizePomodoros(incoming.pomodoros)
     }
   };
 }
@@ -504,7 +521,7 @@ function loadData() {
     dataReadFailReason = result.reason;
     console.error('Recall could not read your saved data (' + result.reason +
                   '). Nothing has been changed. Writing is blocked until this is resolved.');
-    return { decks: [], cards: [], log: {}, assignments: [], gamification: emptyGamification() };
+    return { decks: [], cards: [], log: {}, assignments: [], gamification: emptyGamification(), pomodoros: {} };
   }
 
   dataReadFailed = false;
@@ -554,7 +571,11 @@ function loadData() {
     // Same trap the comment above describes: this return rebuilds the object from
     // scratch, so a field missing HERE is lost even when parseSavedData carried it.
     const gamification = normalizeGamification(parsed.gamification);
-    return { decks, cards, log, assignments, gamification };
+    // Rebuild site 4 (feature #34) — THE TRAP. This return names its keys explicitly,
+    // so a key omitted HERE is lost on every reload even though parseSavedData carried
+    // it correctly. That is the #27 assignments bug verbatim. Pinned by check E2.
+    const pomodoros = normalizePomodoros(parsed.pomodoros);
+    return { decks, cards, log, assignments, gamification, pomodoros };
   }
 }
 
@@ -1551,6 +1572,261 @@ function deleteAssignment(id) {
   saveData({ ...data, assignments: data.assignments.filter(a => a.id !== id) });
 }
 
+/* ── PURE pomodoro ───────────────────────────────────────────────
+   1H. POMODORO — the focus timer (feature #34), pure half.
+
+   Everything here is a plain function of its arguments: no clock of its own, no DOM,
+   no audio. `now` is always passed in, so "has the block finished" is testable without
+   waiting 25 minutes.
+
+   THIS BLOCK MUST NOT REFERENCE ANYTHING OUTSIDE ITSELF. (C) test-pomodoro.mjs lifts it
+   out with new Function() and evaluates it standalone; naming an outside identifier
+   (DAY, dayKey, startOfDay) throws a ReferenceError that takes the whole slice down and
+   fakes a failure for every check in the suite.
+
+   WHY POMODOROS ARE NOT IN `log`. The brief asked for data.log[date].pomodoros.
+   `log[date]` is a REVIEW COUNT, read as a number in five places — the streak, the
+   longest streak, the 7-day total, the stat cards and the heatmap. Making it an object
+   turns `(log[k] || 0) > 0` into false and `sum += log[k]` into the string
+   "0[object Object]", so the streak silently resets, the heatmap empties and
+   gamification (which reads the streak) goes with it. Measured before it was written.
+   `data.pomodoros` is a separate top-level key, which costs five rebuild sites and
+   breaks nothing. Pinned by check E8.
+   ---------------------------------------------------------------- */
+
+const POMODORO_FOCUS_SECONDS = 25 * 60;
+const POMODORO_BREAK_SECONDS = 5 * 60;
+/* Untagged decks get ONE named bucket rather than an empty-string key, which would
+   render as a blank row in the stats and read as a rendering bug. */
+const POMODORO_NO_SUBJECT = 'Sem disciplina';
+
+function pomodoroPad2(n) { return String(n).padStart(2, '0'); }
+
+/* MM:SS, fixed width. Minutes are NOT wrapped at 60 — this is a duration, not a wall
+   clock, so a 90-minute block reads 90:00 and never 30:00. Anything negative or
+   unparseable clamps to 00:00: a late tick must not paint "-1:-1" on the screen. */
+function formatTime(seconds) {
+  const s = Number(seconds);
+  const safe = Number.isFinite(s) && s > 0 ? Math.floor(s) : 0;
+  return pomodoroPad2(Math.floor(safe / 60)) + ':' + pomodoroPad2(safe % 60);
+}
+
+/* Elapsed time comes from real timestamps, never from counting ticks.
+
+   A background tab is throttled and may not fire for minutes at a time, so a tick
+   counter drifts and a 25-minute block silently becomes 40. Subtracting two Date.now()
+   values is immune to that: the app can wake up an hour late and still report `done`
+   with 0 remaining, which is what check B6 pins.
+
+   `pausedAt` freezes the clock — elapsed is measured to the pause, not to now — so
+   leaving a paused timer overnight does not silently complete a block (B8). A
+   backwards clock jump (NTP correction) clamps to 0 rather than going negative (B11). */
+function calculateTimerState(startTime, duration, pausedAt, now) {
+  const dur = Number(duration) > 0 ? Number(duration) : 0;
+  if (!startTime) return { remaining: dur, done: false, progress: 0 };
+
+  const end = pausedAt ? Number(pausedAt) : Number(now);
+  let elapsedMs = end - Number(startTime);
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+
+  const elapsed = Math.floor(elapsedMs / 1000);
+  const remaining = Math.max(0, dur - elapsed);
+  const progress = dur === 0 ? 100 : Math.min(100, Math.max(0, (elapsed / dur) * 100));
+  return { remaining, done: remaining === 0, progress };
+}
+
+/* A completed block, counted per subject per day. Returns a NEW object at both levels
+   — the map and the day inside it — because a nested spread that reuses the day object
+   would mutate the caller's library in place. Pinned by C5.
+
+   Corrupt shapes degrade rather than throw: a day that is a number, or a count that is
+   not a number, restarts at 1. A NaN here would poison every total that reads it. */
+function logPomodoro(pomodoros, subject, dateStr) {
+  const map = (pomodoros && typeof pomodoros === 'object') ? pomodoros : {};
+  const key = String(dateStr);
+  const subj = String(subject == null ? '' : subject).trim() || POMODORO_NO_SUBJECT;
+
+  const dayRaw = map[key];
+  // Array.isArray matters: typeof [] is 'object', and spreading an array yields index
+  // keys — {...[1,2]} is {0:1,1:2}, which would invent subjects named "0" and "1".
+  const day = (dayRaw && typeof dayRaw === 'object' && !Array.isArray(dayRaw)) ? dayRaw : {};
+  const prev = Number(day[subj]);
+
+  return { ...map, [key]: { ...day, [subj]: Number.isFinite(prev) && prev > 0 ? prev + 1 : 1 } };
+}
+
+/* Decks have no `subject` field — only assignments do. The deck's `tag` is the
+   existing categorisation, so it is what a pomodoro is filed under. One function, so
+   that decision lives in one place instead of at every call site. */
+function deckSubject(deck) {
+  return String((deck && deck.tag) || '').trim() || POMODORO_NO_SUBJECT;
+}
+
+/* Lifetime totals per subject. A corrupt day is skipped, not thrown on: one bad entry
+   must not take down the whole stat. */
+function pomodoroTotals(pomodoros) {
+  const map = (pomodoros && typeof pomodoros === 'object') ? pomodoros : {};
+  const out = {};
+  for (const key of Object.keys(map)) {
+    const day = map[key];
+    // Arrays rejected for the same reason as in logPomodoro: Object.keys([5,6]) is
+    // ['0','1'], which would add two junk subjects to a lifetime total.
+    if (!day || typeof day !== 'object' || Array.isArray(day)) continue;
+    for (const subj of Object.keys(day)) {
+      const n = Number(day[subj]);
+      if (!Number.isFinite(n)) continue;
+      out[subj] = (out[subj] || 0) + n;
+    }
+  }
+  return out;
+}
+/* ── END PURE pomodoro */
+
+/* ── 1H-impure. POMODORO — loop, sound, persistence ──────────────
+   The thin outside half: a tick, a beep, and one write. Everything decidable lives in
+   the pure block above.
+
+   ONE timer across Study, Cram and Quiz on purpose — it is one study session, and a
+   timer that resets when you switch from cards to a quiz would be measuring the screen
+   rather than the work.
+   ---------------------------------------------------------------- */
+
+let pomodoroStart = null;      // ms timestamp the current block began
+let pomodoroPausedAt = null;   // ms timestamp of the pause, or null while running
+let pomodoroMode = 'focus';    // 'focus' | 'break'
+let pomodoroTickId = null;
+let pomodoroAudioCtx = null;
+
+function pomodoroDuration() {
+  return pomodoroMode === 'break' ? POMODORO_BREAK_SECONDS : POMODORO_FOCUS_SECONDS;
+}
+function pomodoroRunning() { return pomodoroStart !== null && pomodoroPausedAt === null; }
+
+/* A short two-note blip, synthesised on the spot.
+
+   No file, no CDN: an <audio src> would be one more thing to precache and one more way
+   for the offline guarantee (#26) to develop a hole. The Web Audio API is in the
+   browser already. Wrapped in try/catch and silent on failure — a timer whose sound
+   card is busy must still keep time. */
+function pomodoroBeep() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!pomodoroAudioCtx) pomodoroAudioCtx = new Ctx();
+    const ctx = pomodoroAudioCtx;
+    // Autoplay policy parks the context until a gesture; the Play button is that gesture.
+    if (ctx.state === 'suspended') ctx.resume();
+
+    const t0 = ctx.currentTime;
+    [{ at: 0, hz: 880 }, { at: 0.22, hz: 1174.66 }].forEach(n => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = n.hz;
+      // Ramped, never a hard start/stop — a square-edged gain is an audible click.
+      gain.gain.setValueAtTime(0.0001, t0 + n.at);
+      gain.gain.exponentialRampToValueAtTime(0.16, t0 + n.at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + n.at + 0.2);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0 + n.at);
+      osc.stop(t0 + n.at + 0.22);
+    });
+  } catch (e) { /* sound is a courtesy; it must never take the timer down */ }
+}
+
+/* 250ms, and the interval is only a REPAINT trigger — it never accumulates time.
+   Every reading comes from calculateTimerState() comparing real timestamps, so a
+   throttled background tab repaints late but is never wrong. */
+function startPomodoroTicking() {
+  if (pomodoroTickId !== null) return;
+  pomodoroTickId = setInterval(pomodoroTick, 250);
+}
+function stopPomodoroTicking() {
+  if (pomodoroTickId === null) return;
+  clearInterval(pomodoroTickId);
+  pomodoroTickId = null;
+}
+
+function pomodoroTick() {
+  const s = calculateTimerState(pomodoroStart, pomodoroDuration(), pomodoroPausedAt, Date.now());
+  renderPomodoro();
+  if (!s.done || pomodoroPausedAt !== null) return;
+
+  stopPomodoroTicking();
+  pomodoroBeep();
+
+  if (pomodoroMode === 'focus') {
+    // Only completed FOCUS blocks are counted. A break is rest, not work, and a
+    // half-finished block is not a pomodoro.
+    recordPomodoroForCurrentDeck();
+    pomodoroMode = 'break';
+    pomodoroStart = Date.now();
+    pomodoroPausedAt = null;
+    startPomodoroTicking();          // the break runs on its own; that is the point
+    toast('Focus block done — 5 minute break');
+  } else {
+    // The break ends ARMED BUT STOPPED. Starting a new focus block for someone who
+    // has walked away would count time nobody spent studying.
+    pomodoroMode = 'focus';
+    pomodoroStart = null;
+    pomodoroPausedAt = null;
+    toast('Break over — press play when you are back');
+  }
+  renderPomodoro();
+}
+
+function recordPomodoroForCurrentDeck() {
+  try {
+    const data = loadData();
+    const subject = deckSubject(getDeck(currentDeckId));
+    saveData({ ...data, pomodoros: logPomodoro(data.pomodoros, subject, dayKey(Date.now())) });
+  } catch (e) {
+    // saveData refuses to write when the last read failed (#19). Losing the count is
+    // the correct trade against overwriting a library we could not read.
+    console.warn('pomodoro not recorded:', e);
+  }
+}
+
+function onPomodoroToggle() {
+  if (pomodoroStart === null) {
+    pomodoroStart = Date.now();
+    pomodoroPausedAt = null;
+  } else if (pomodoroPausedAt !== null) {
+    // Resume by shifting the start forward by however long the pause lasted, so the
+    // remaining time is exactly what it was when paused.
+    pomodoroStart += Date.now() - pomodoroPausedAt;
+    pomodoroPausedAt = null;
+  } else {
+    pomodoroPausedAt = Date.now();
+  }
+  if (pomodoroRunning()) startPomodoroTicking(); else stopPomodoroTicking();
+  renderPomodoro();
+}
+
+function onPomodoroReset() {
+  stopPomodoroTicking();
+  pomodoroStart = null;
+  pomodoroPausedAt = null;
+  pomodoroMode = 'focus';
+  renderPomodoro();
+}
+
+function renderPomodoro() {
+  const slots = document.querySelectorAll('.pomodoro-slot');
+  if (!slots.length) return;
+  const s = calculateTimerState(pomodoroStart, pomodoroDuration(), pomodoroPausedAt, Date.now());
+  const label = pomodoroMode === 'break' ? 'BREAK' : 'FOCUS';
+  const running = pomodoroRunning();
+  const html =
+    `<span class="pomo-state">[${label}]</span>` +
+    `<span class="pomo-clock">${formatTime(s.remaining)}</span>` +
+    `<button class="pomo-btn" type="button" onclick="onPomodoroToggle()" ` +
+      `aria-label="${running ? 'Pause' : 'Start'} the focus timer">${running ? '❚❚' : '▶'}</button>` +
+    `<button class="pomo-btn" type="button" onclick="onPomodoroReset()" ` +
+      `aria-label="Reset the focus timer">↺</button>`;
+  slots.forEach(el => { el.innerHTML = html; });
+}
+
 /* ----------------------------------------------------------------
    2. SM-2 SCHEDULER
    ----------------------------------------------------------------
@@ -1616,6 +1892,11 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById('screen-' + id).classList.add('active');
   window.scrollTo(0, 0);
+  // Pomodoro (feature #34). Hooked HERE rather than in startReview/startQuiz/startCram
+  // because all three funnel through this function — one call instead of three that
+  // could drift apart. The slots only exist on those screens, so this is a no-op
+  // everywhere else, and a running timer is unaffected by navigating away.
+  renderPomodoro();
 }
 function setCrumb(text) { document.getElementById('nav-crumb').textContent = text || ''; }
 function setActiveTab(tab) {
