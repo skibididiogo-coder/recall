@@ -418,7 +418,20 @@ h1.page{font-family:var(--font-display);font-weight:300;font-size:36px;letter-sp
 /* ── Modal ── */
 .modal-backdrop{position:fixed;inset:0;z-index:50;background:rgba(10,10,10,0.35);display:none;align-items:center;justify-content:center;padding:24px;animation:fade 140ms ease-out}
 .modal-backdrop.open{display:flex}
-.modal{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:0 16px 48px rgba(0,0,0,0.18);width:100%;max-width:420px;padding:28px}
+/* max-height + overflow are NOT cosmetic — they are what makes a tall modal usable.
+
+   The backdrop is position:fixed with align-items:center. A flex item taller than its
+   container overflows BOTH ends equally, and neither end can be scrolled to, because a
+   fixed backdrop has nothing to scroll. Settings crossed that line when feature #33
+   added a third field, its error row and a four-line hint: measured 2026-08-25 at 747px
+   tall, so on a 600px window it sat at top:-73 / bottom:673 and the Save button was
+   off-screen with no way to reach it — a setting you can type but cannot save.
+
+   48px is the backdrop's own 24px padding, top and bottom. dvh first so mobile browser
+   chrome is excluded; vh is the fallback for anything that does not know dvh.
+   Pinned by checks M1–M5 in (C) live-gcal-check.mjs. */
+.modal{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:0 16px 48px rgba(0,0,0,0.18);width:100%;max-width:420px;padding:28px;
+  max-height:calc(100vh - 48px);max-height:calc(100dvh - 48px);overflow-y:auto;overscroll-behavior:contain}
 .modal h2{font-family:var(--font-display);font-weight:500;font-size:20px;margin-bottom:6px}
 .modal-sub{font-size:13px;color:var(--ink-2);margin-bottom:18px;line-height:1.5}
 .modal-sub a{color:var(--ink);font-weight:500}
