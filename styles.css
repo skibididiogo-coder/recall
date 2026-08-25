@@ -848,3 +848,15 @@ li.tl-item:last-child{padding-bottom:0}
   .review-head{flex-wrap:wrap;gap:8px}
   .pomodoro-slot{order:3;width:100%;justify-content:flex-start}
 }
+
+/* Two numbers that are one decision (feature #35): focus length and break length sit
+   side by side under a single label rather than as two separate fields, because
+   choosing one without the other is not a thing anyone does. Equal columns, the same
+   input styling as every other field — no new form vocabulary for this one case. */
+.field-pair{display:flex;gap:10px}
+.field-pair > input{flex:1;min-width:0}
+/* The spinner arrows are noise at this size and invite click-by-click adjustment of a
+   value you already know. Typed, not nudged. */
+.field-pair input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.field-pair input[type=number]::-webkit-outer-spin-button,
+.field-pair input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}

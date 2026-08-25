@@ -691,6 +691,19 @@
       <div class="field-hint">Mirrors assignments that have a due date into your Google Calendar, one way, when you press Sync. Create an OAuth client ID (type: Web application) in Google Cloud Console and allow this exact address as an origin. Leave empty to turn this off.</div>
     </div>
     <div class="form-error" id="gcal-client-error" style="margin-bottom:8px"></div>
+    <!-- Pomodoro lengths (feature #35). Side by side because they are one decision,
+         not two: how long you work and how long you rest are chosen together. -->
+    <div class="field">
+      <label for="pomo-focus-input">Focus / break length (minutes)</label>
+      <div class="field-pair">
+        <input id="pomo-focus-input" type="number" min="1" max="180" step="1"
+               inputmode="numeric" placeholder="25" autocomplete="off" aria-label="Focus length in minutes">
+        <input id="pomo-break-input" type="number" min="1" max="180" step="1"
+               inputmode="numeric" placeholder="5" autocomplete="off" aria-label="Break length in minutes">
+      </div>
+      <div class="field-hint">Used by the timer on the Study, Cram and Quiz screens. Leave either empty to go back to 25 and 5. A change applies to your next block, or straight away if you press reset.</div>
+    </div>
+    <div class="form-error" id="pomo-error" style="margin-bottom:8px"></div>
     <div class="field-hint" id="build-id-line" style="margin-bottom:8px"></div>
     <div class="modal-actions">
       <button class="btn btn-danger-ghost" onclick="onClearKey()">Remove key</button>

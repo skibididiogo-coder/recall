@@ -1594,8 +1594,14 @@ function deleteAssignment(id) {
    breaks nothing. Pinned by check E8.
    ---------------------------------------------------------------- */
 
-const POMODORO_FOCUS_SECONDS = 25 * 60;
-const POMODORO_BREAK_SECONDS = 5 * 60;
+/* Defaults in MINUTES, because that is the unit the user types (feature #35). The
+   seconds conversion happens at the one place the timer needs it. */
+const POMODORO_FOCUS_DEFAULT_MIN = 25;
+const POMODORO_BREAK_DEFAULT_MIN = 5;
+/* Inclusive bounds. 1 because a zero-length block completes instantly and forever;
+   180 because past three hours it is not a focus block, it is a typo. */
+const POMODORO_MIN_MINUTES = 1;
+const POMODORO_MAX_MINUTES = 180;
 /* Untagged decks get ONE named bucket rather than an empty-string key, which would
    render as a blank row in the stats and read as a rendering bug. */
 const POMODORO_NO_SUBJECT = 'Sem disciplina';
@@ -1680,6 +1686,43 @@ function pomodoroTotals(pomodoros) {
   }
   return out;
 }
+/* ONE validator, TWO callers.
+
+   `ok` means "exactly what was typed is valid", so the SAVE path can refuse it with a
+   message. `value` is ALWAYS usable, so the READ path can never hand calculateTimerState
+   a NaN, a zero or a negative duration. A lenient reader and a strict writer that
+   disagree is how a setting ends up saved but never applied.
+
+   Empty is NOT an error: clearing the field means "use the default", which is the only
+   way to get back to 25/5 without remembering what they were. */
+function parsePomodoroMinutes(raw, fallback) {
+  const fb = Number(fallback);
+  const safeFallback = Number.isFinite(fb) ? fb : POMODORO_FOCUS_DEFAULT_MIN;
+  const range = 'between ' + POMODORO_MIN_MINUTES + ' and ' + POMODORO_MAX_MINUTES;
+
+  const text = String(raw == null ? '' : raw).trim();
+  if (text === '') return { ok: true, value: safeFallback, error: '' };
+
+  // localStorage only ever returns strings, so a numeric string is the NORMAL case,
+  // not a suspicious one — rejecting it would refuse every value ever saved.
+  const n = Number(text);
+  if (!Number.isFinite(n)) {
+    return { ok: false, value: safeFallback, error: 'Minutes must be a number ' + range + '.' };
+  }
+
+  const floored = Math.floor(n);
+  const clamped = Math.min(POMODORO_MAX_MINUTES, Math.max(POMODORO_MIN_MINUTES, floored));
+
+  if (floored !== n) {
+    return { ok: false, value: clamped, error: 'Minutes must be a whole number ' + range + '.' };
+  }
+  if (clamped !== floored) {
+    // The message NAMES the range. An error that only says "invalid" leaves the user
+    // guessing at what would be accepted.
+    return { ok: false, value: clamped, error: 'Minutes must be ' + range + '.' };
+  }
+  return { ok: true, value: clamped, error: '' };
+}
 /* ── END PURE pomodoro */
 
 /* ── 1H-impure. POMODORO — loop, sound, persistence ──────────────
@@ -1697,8 +1740,32 @@ let pomodoroMode = 'focus';    // 'focus' | 'break'
 let pomodoroTickId = null;
 let pomodoroAudioCtx = null;
 
+const POMODORO_FOCUS_KEY = 'recall.pomodoroFocus';
+const POMODORO_BREAK_KEY = 'recall.pomodoroBreak';
+
+function getPomodoroFocusMinutes() {
+  return parsePomodoroMinutes(localStorage.getItem(POMODORO_FOCUS_KEY), POMODORO_FOCUS_DEFAULT_MIN).value;
+}
+function getPomodoroBreakMinutes() {
+  return parsePomodoroMinutes(localStorage.getItem(POMODORO_BREAK_KEY), POMODORO_BREAK_DEFAULT_MIN).value;
+}
+
+/* The length of the block CURRENTLY running, fixed at the moment it started.
+
+   pomodoroDuration() is read on every tick. If it read the setting live, saving a new
+   focus length mid-block would retroactively change how long the block you are already
+   sitting in was supposed to be — a 25-minute block you are 20 minutes into would
+   finish instantly the moment you saved 15. Locking it at the start means a new
+   setting applies to the NEXT block, or immediately on Reset, which is what was asked
+   for. `null` means idle, and idle reads the setting live so the clock updates the
+   moment you save. */
+let pomodoroBlockSeconds = null;
+
+function pomodoroConfiguredSeconds() {
+  return (pomodoroMode === 'break' ? getPomodoroBreakMinutes() : getPomodoroFocusMinutes()) * 60;
+}
 function pomodoroDuration() {
-  return pomodoroMode === 'break' ? POMODORO_BREAK_SECONDS : POMODORO_FOCUS_SECONDS;
+  return pomodoroBlockSeconds !== null ? pomodoroBlockSeconds : pomodoroConfiguredSeconds();
 }
 function pomodoroRunning() { return pomodoroStart !== null && pomodoroPausedAt === null; }
 
@@ -1762,6 +1829,7 @@ function pomodoroTick() {
     pomodoroMode = 'break';
     pomodoroStart = Date.now();
     pomodoroPausedAt = null;
+    pomodoroBlockSeconds = getPomodoroBreakMinutes() * 60;   // locked for this block
     startPomodoroTicking();          // the break runs on its own; that is the point
     toast('Focus block done — 5 minute break');
   } else {
@@ -1770,6 +1838,7 @@ function pomodoroTick() {
     pomodoroMode = 'focus';
     pomodoroStart = null;
     pomodoroPausedAt = null;
+    pomodoroBlockSeconds = null;    // idle again: the next block reads the setting fresh
     toast('Break over — press play when you are back');
   }
   renderPomodoro();
@@ -1791,6 +1860,7 @@ function onPomodoroToggle() {
   if (pomodoroStart === null) {
     pomodoroStart = Date.now();
     pomodoroPausedAt = null;
+    pomodoroBlockSeconds = pomodoroConfiguredSeconds();   // locked for this block
   } else if (pomodoroPausedAt !== null) {
     // Resume by shifting the start forward by however long the pause lasted, so the
     // remaining time is exactly what it was when paused.
@@ -1808,6 +1878,8 @@ function onPomodoroReset() {
   pomodoroStart = null;
   pomodoroPausedAt = null;
   pomodoroMode = 'focus';
+  // Back to idle, so Reset is also how you adopt a new setting without waiting.
+  pomodoroBlockSeconds = null;
   renderPomodoro();
 }
 
@@ -2937,6 +3009,11 @@ function openKeyModal() {
   document.getElementById('server-error').textContent = '';
   document.getElementById('gcal-client-input').value = getGCalClientId();
   document.getElementById('gcal-client-error').textContent = '';
+  // Shown blank when unset, so the placeholder (25 / 5) tells you the default rather
+  // than a prefilled number implying you once chose it.
+  document.getElementById('pomo-focus-input').value = localStorage.getItem(POMODORO_FOCUS_KEY) || '';
+  document.getElementById('pomo-break-input').value = localStorage.getItem(POMODORO_BREAK_KEY) || '';
+  document.getElementById('pomo-error').textContent = '';
   // Which code am I actually running? A waiting service worker cannot activate while
   // any tab is still open, so "I pushed the fix" and "I am running the fix" are not
   // the same statement. This makes the difference visible instead of silent.
@@ -2986,6 +3063,24 @@ function onSaveKey() {
   else localStorage.removeItem(GCAL_CLIENT_ID_KEY);
   document.getElementById('gcal-client-error').textContent = '';
 
+  // Refused, not silently clamped: a field that quietly rewrites 500 to 180 teaches
+  // you nothing and looks like the app ignored you. parsePomodoroMinutes gives both
+  // answers at once — `ok` for this path, `value` for the reader.
+  const rawFocus = document.getElementById('pomo-focus-input').value;
+  const rawBreak = document.getElementById('pomo-break-input').value;
+  const focusCheck = parsePomodoroMinutes(rawFocus, POMODORO_FOCUS_DEFAULT_MIN);
+  const breakCheck = parsePomodoroMinutes(rawBreak, POMODORO_BREAK_DEFAULT_MIN);
+  if (!focusCheck.ok || !breakCheck.ok) {
+    document.getElementById('pomo-error').textContent =
+      (!focusCheck.ok ? 'Focus: ' + focusCheck.error : 'Break: ' + breakCheck.error);
+    return;
+  }
+  if (String(rawFocus).trim()) localStorage.setItem(POMODORO_FOCUS_KEY, String(focusCheck.value));
+  else localStorage.removeItem(POMODORO_FOCUS_KEY);
+  if (String(rawBreak).trim()) localStorage.setItem(POMODORO_BREAK_KEY, String(breakCheck.value));
+  else localStorage.removeItem(POMODORO_BREAK_KEY);
+  document.getElementById('pomo-error').textContent = '';
+
   const k = document.getElementById('key-input').value.trim();
   if (k && !k.startsWith('sk-ant-')) {
     document.getElementById('key-error').textContent = 'That doesn\'t look like an Anthropic key (should start with sk-ant-).';
@@ -2996,6 +3091,9 @@ function onSaveKey() {
   closeKeyModal();
   renderBackupNudge();
   renderGCalPanel();
+  // An IDLE clock reads the setting live, so this repaint is what makes a new length
+  // visible at once. A running block keeps the length it started with.
+  renderPomodoro();
   // Turning backups off is announced, never silent — the notice wins over the generic
   // confirmation, because it is the one thing here worth noticing.
   toast(change.notice || 'Settings saved');
