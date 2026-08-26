@@ -994,3 +994,11 @@ li.tl-item:last-child{padding-bottom:0}
   .exam-grade20{font-size:60px}
   .exam-options,.exam-answer{margin-left:0}
 }
+
+/* Where the structure came from (feature #36, corrected 2026-08-26). The 2026
+   Informação-Provas do not lay out Grupos, so most of the time this split is Recall's
+   own — and a table of Grupos reads as official unless it says otherwise. */
+.exam-format-source{font-size:13px;line-height:1.55;border-radius:var(--r);padding:11px 14px;margin-bottom:14px;text-wrap:pretty}
+.exam-format-source.official{background:var(--success-bg);border:1px solid rgba(26,127,55,0.28);color:var(--success)}
+.exam-format-source.proposed{background:var(--warning-bg);border:1px solid rgba(154,103,0,0.3);color:#6b4800}
+.exam-format-source.proposed strong{color:#5a3d00}

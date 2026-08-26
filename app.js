@@ -2031,8 +2031,11 @@ function parseExamFormatResponse(parsed) {
       'That PDF does not look like an Informação-Prova.' };
   }
   const groups = Array.isArray(parsed.groups) ? parsed.groups : [];
+  // An empty array is a BROKEN MODEL RESPONSE, not a property of the document. The
+  // model is asked to propose a split whenever the document is silent, so it should
+  // never come back with none.
   if (groups.length === 0) {
-    return { ok: false, refusal: 'No Grupos found in that PDF — is it the right document?' };
+    return { ok: false, refusal: 'Claude returned no Grupos at all. Try reading the PDF again.' };
   }
   const dur = Number(parsed.durationMin);
   if (!Number.isFinite(dur) || dur < EXAM_MIN_DURATION || dur > EXAM_MAX_DURATION) {
@@ -2048,6 +2051,19 @@ function parseExamFormatResponse(parsed) {
       // Not taken from the PDF. A national exam is 200 points; a model that read 137
       // off a table misread the table, and trusting it would rescale every mark.
       totalPoints: EXAM_TOTAL_POINTS,
+      /* Did the Grupo split come from the DOCUMENT, or from Claude?
+
+         MEASURED 2026-08-26 on the real 2026 documents: neither História A (623) nor
+         Física e Química A (715) names Grupos or per-group cotações. They give the
+         total, the duration, the item types and the themes — and stop there. The
+         original design assumed otherwise, and refusing on that assumption would have
+         refused every official document in existence.
+
+         So the split is now allowed to come from Claude — and this flag is the whole
+         price of that. It defaults to FALSE on anything unclear, because claiming a
+         split is official when it is not is the exact failure the mandatory-PDF
+         decision existed to prevent. The setup screen reads this and says so. */
+      groupsFromDocument: parsed.groupsFromDocument === true,
       groups: groups.map(g => ({
         id: String(g.id || ''),
         title: String(g.title || ''),
@@ -6224,6 +6240,8 @@ const FORMAT_SCHEMA = {
     // away, and only the model can see which it is looking at.
     isExamInfo:  { type: 'boolean' },
     reason:      { type: 'string' },
+    // true only when the document ITSELF lays out the Grupos and their cotações.
+    groupsFromDocument: { type: 'boolean' },
     subject:     { type: 'string' },
     code:        { type: 'string' },
     year:        { type: 'string' },
@@ -6245,7 +6263,8 @@ const FORMAT_SCHEMA = {
       }
     }
   },
-  required: ['isExamInfo', 'reason', 'subject', 'code', 'year', 'durationMin', 'totalPoints', 'groups'],
+  required: ['isExamInfo', 'reason', 'groupsFromDocument', 'subject', 'code', 'year',
+             'durationMin', 'totalPoints', 'groups'],
   additionalProperties: false
 };
 
@@ -6323,9 +6342,14 @@ async function callClaudeExamFormat(pdfText) {
     `document), set "isExamInfo": false and put ONE plain sentence in "reason" saying ` +
     `what it looks like instead. Extract nothing else.\n` +
     `2. Extract only what the document states. NEVER fill a gap from memory of other exams.\n` +
-    `3. "groups": one entry per Grupo, in order, with its item count, item kinds and cotação.\n` +
-    `4. "durationMin": the official duration in minutes.\n` +
-    `5. Unknown "code" or "year" → empty string. Never guess them.`;
+    `3. If the document DOES lay out Grupos with their cotações, copy them exactly and ` +
+    `set "groupsFromDocument": true.\n` +
+    `4. If it does NOT — the 2026 documents typically do not — set "groupsFromDocument": ` +
+    `false and PROPOSE a sensible split instead, using only what the document does say: ` +
+    `the total of 200 points, the item types it names, and the duration. Two or three ` +
+    `Grupos, cotações totalling exactly 200. Never present a proposal as if it were quoted.\n` +
+    `5. "durationMin": the official duration in minutes.\n` +
+    `6. Unknown "code" or "year" → empty string. Never guess them.`;
 
   let res;
   try {
@@ -6618,12 +6642,22 @@ function renderExamFormat() {
 
   const meta = [fmt.code && ('Prova ' + fmt.code), fmt.year, fmt.durationMin + ' min']
     .filter(Boolean).join(' · ');
+  /* Said plainly, above the structure, not in a footnote. A student looking at a table
+     of Grupos will assume the IAVE wrote it unless told otherwise — and for every real
+     2026 document, the IAVE did not. */
+  const provenance = fmt.groupsFromDocument
+    ? `<div class="exam-format-source official">Grupos and cotações read from the document.</div>`
+    : `<div class="exam-format-source proposed"><strong>Recall chose this split.</strong> ` +
+      `The official Informação-Prova gives the duration, the 200 points, the item types ` +
+      `and the themes — but does not say how the exam divides into Grupos. Everything ` +
+      `above except the split comes from the document.</div>`;
   wrap.innerHTML = `
     <div class="exam-format-card">
       <div class="exam-format-head">
         <span class="exam-format-subject">${escapeHtml(fmt.subject)}</span>
         <span class="exam-format-meta">${escapeHtml(meta)}</span>
       </div>
+      ${provenance}
       <div class="exam-format-groups">
         ${fmt.groups.map(g => `
           <div class="exam-format-row">
