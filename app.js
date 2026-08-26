@@ -99,6 +99,18 @@ function normalizePomodoros(v) {
   return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
 }
 
+/* `exams` (feature #36) is a SIXTH top-level key. Anything unusable degrades to []
+   and NEVER to a `wrong-shape` refusal — a refusal here arms the #19 write lock
+   against a library that is otherwise perfectly good, which is far worse than
+   dropping a key nothing has written yet.
+
+   Defined HERE in 1B for the same reason normalizePomodoros is, one comment above:
+   test-backup.mjs and test-migration.mjs evaluate ONLY the 1B slice, so a helper
+   defined further down is not in scope for the functions below that call it. */
+function normalizeExams(v) {
+  return Array.isArray(v) ? v : [];
+}
+
 function normalizeAssignmentsForGcal(list) {
   return (Array.isArray(list) ? list : [])
     .map(a => (a ? { ...a, gcalEventId: normalizeGcalEventId(a.gcalEventId) } : a));
@@ -107,7 +119,7 @@ function normalizeAssignmentsForGcal(list) {
 function parseSavedData(raw) {
   // No key at all = a genuinely new install. Empty, but not a fault.
   if (raw === null || raw === undefined || raw === '') {
-    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [], gamification: null, pomodoros: {} } };
+    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [], gamification: null, pomodoros: {}, exams: [] } };
   }
 
   let parsed;
@@ -138,6 +150,9 @@ function parseSavedData(raw) {
       assignments: normalizeAssignmentsForGcal(parsed.assignments),
       // Rebuild site 2 (feature #34).
       pomodoros: normalizePomodoros(parsed.pomodoros),
+      // Rebuild site 2 (feature #36). Same rule as assignments and pomodoros: a
+      // library saved before Exam Mode has no `exams` and must still read cleanly.
+      exams: normalizeExams(parsed.exams),
       // `gamification` (feature #32) is the newest field and follows the same rule as
       // assignments: anything unusable degrades to null and is rebuilt by
       // normalizeGamification in loadData. It must NEVER make an older save
@@ -243,7 +258,10 @@ function parseBackupFile(raw) {
       assignments: normalizeAssignmentsForGcal(incoming.assignments),
       // Rebuild site 5 (feature #34). A pre-#34 backup has no pomodoros and must still
       // import; a post-#34 one carries real counts that must survive the restore.
-      pomodoros: normalizePomodoros(incoming.pomodoros)
+      pomodoros: normalizePomodoros(incoming.pomodoros),
+      // Rebuild site 3 (feature #36). A pre-#36 backup has no exams and must still
+      // import; a post-#36 one carries real sittings that must survive the restore.
+      exams: normalizeExams(incoming.exams)
     }
   };
 }
@@ -521,7 +539,10 @@ function loadData() {
     dataReadFailReason = result.reason;
     console.error('Recall could not read your saved data (' + result.reason +
                   '). Nothing has been changed. Writing is blocked until this is resolved.');
-    return { decks: [], cards: [], log: {}, assignments: [], gamification: emptyGamification(), pomodoros: {} };
+    // Rebuild site 4 (feature #36). The #19 lock hands back an empty library so the
+    // UI can still render — it must be SHAPED like a real one, or every read of
+    // data.exams throws on undefined while the app is already in its failure state.
+    return { decks: [], cards: [], log: {}, assignments: [], gamification: emptyGamification(), pomodoros: {}, exams: [] };
   }
 
   dataReadFailed = false;
@@ -546,6 +567,11 @@ function loadData() {
         // Decks saved before it get SPEECH_DEFAULT_LANG, which became en-US on
         // 2026-07-26 when all decks went English. Same backfill idea as above.
         lang: normalizeLang(d.lang),
+        // examFormat (feature #36): the IAVE Informação-Prova structure, extracted
+        // once per deck. Deck fields backfill in ONE place, so this costs 2 sites
+        // (here + createDeck) against 5 for a top-level key. That is why it lives
+        // on the deck and data.exams does not.
+        examFormat: d.examFormat === undefined ? null : d.examFormat,
         artifacts
       };
     });
@@ -575,7 +601,12 @@ function loadData() {
     // so a key omitted HERE is lost on every reload even though parseSavedData carried
     // it correctly. That is the #27 assignments bug verbatim. Pinned by check E2.
     const pomodoros = normalizePomodoros(parsed.pomodoros);
-    return { decks, cards, log, assignments, gamification, pomodoros };
+    // Rebuild site 5 (feature #36) — THE TRAP. This return names its keys
+    // explicitly. `exams` built here but omitted from the object literal below is
+    // lost on EVERY reload even though parseSavedData carried it correctly one
+    // function earlier. That is the #27 assignments bug verbatim. Pinned by B8.
+    const exams = normalizeExams(parsed.exams);
+    return { decks, cards, log, assignments, gamification, pomodoros, exams };
   }
 }
 
@@ -799,7 +830,7 @@ function createDeck(name, tag, lang) {
   const data = loadData();
   const deck = {
     id: newId('deck'), name, tag: tag || '', createdAt: Date.now(),
-    summary: '', source: '', lang: normalizeLang(lang), artifacts: {}
+    summary: '', source: '', lang: normalizeLang(lang), artifacts: {}, examFormat: null
   };
   saveData({ ...data, decks: [...data.decks, deck] });
   return deck;
@@ -841,7 +872,11 @@ function deleteDeck(deckId) {
   saveData({
     ...data,
     decks: data.decks.filter(d => d.id !== deckId),
-    cards: data.cards.filter(c => c.deckId !== deckId)
+    cards: data.cards.filter(c => c.deckId !== deckId),
+    // Feature #36. `...data` above carries unknown keys straight through, so WITHOUT
+    // this filter the exams outlive their deck, keyed to a deckId nothing resolves.
+    // Nothing in the UI could list them and nothing could ever remove them.
+    exams: (data.exams || []).filter(e => e.deckId !== deckId)
   });
   // Drop the in-memory chat thread too (feature #29). Ids are unique, so this is
   // belt-and-braces rather than a live bug — but a deleted deck leaving its
