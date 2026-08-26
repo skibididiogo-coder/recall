@@ -1935,6 +1935,295 @@ function renderPomodoro() {
 }
 
 /* ----------------------------------------------------------------
+   1I. EXAM MODE — Exames Nacionais (feature #36), pure half.
+   ----------------------------------------------------------------
+   A mock national exam built from a deck's own material, in the structure of that
+   subject's official IAVE Informação-Prova, sat under a clock and marked out of 200.
+
+   Its own section rather than a corner of 1H: the block first landed between the
+   pomodoro's pure and impure halves, which made the file read POMODORO → EXAM →
+   POMODORO. Structure that confusing becomes a bug eventually.
+
+   THREE THINGS THE MODEL WILL GET WRONG, AND WHERE EACH IS CAUGHT:
+     1. A paper that does not total 200 points. JSON Schema cannot express "these
+        numbers sum to 200", so parseExamResponse sums and refuses. A 190-point paper
+        marks every answer 5% low, silently, forever.
+     2. A mark above what the item is worth. parseGradingResponse clamps to
+        [0, points]. An inflated mark looks exactly like a good one.
+     3. An item skipped or invented during marking. Skipped items are filled with 0
+        AND say "not marked"; invented ids are dropped.
+
+   The clock is deliberately NOT calculateTimerState — that name belongs to the
+   pomodoro (1H). A second declaration would not error: the later one simply WINS,
+   and the focus timer would break in silence on Study, Cram and Quiz.
+   ---------------------------------------------------------------- */
+
+/* ── PURE exam ───────────────────────────────────────────────────
+   THIS BLOCK MUST NOT REFERENCE ANYTHING OUTSIDE ITSELF. (C) test-exam-mode.mjs
+   lifts it out with new Function() and evaluates it standalone — naming an outside
+   identifier throws a ReferenceError that takes the whole slice down and fakes a
+   failure for every check in the suite.
+
+   normalizeExams is NOT here. It lives in 1B beside normalizePomodoros, because
+   parseSavedData and parseBackupFile call it and those are evaluated from the 1B
+   slice alone. Putting it here broke (C) test-backup.mjs and (C) test-migration.mjs
+   on 2026-08-26 — the comment above normalizePomodoros had already warned about it. */
+
+const EXAM_TOTAL_POINTS = 200;          // a national exam is always out of 200
+const EXAM_MIN_DURATION = 15;           // minutes; below this it is not an exam
+const EXAM_MAX_DURATION = 360;          // minutes; above this the PDF was misread
+const EXAM_KINDS = ['mc', 'short', 'long'];
+
+function examPad2(n) { return String(n).padStart(2, '0'); }
+
+/* mm:ss under an hour, hh:mm:ss over it. A national exam runs 90-150 minutes, so
+   "02:29:00" reads far better than the pomodoro's un-wrapped "149:00".
+   Anything negative or unparseable clamps to 00:00 — a late tick must never paint
+   a negative clock. */
+function formatExamClock(ms) {
+  const raw = Number(ms);
+  const secs = Number.isFinite(raw) && raw > 0 ? Math.floor(raw / 1000) : 0;
+  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), sec = secs % 60;
+  return h > 0
+    ? examPad2(h) + ':' + examPad2(m) + ':' + examPad2(sec)
+    : examPad2(m) + ':' + examPad2(sec);
+}
+
+/* Elapsed comes from timestamps, never from counting ticks — a throttled background
+   tab would drift and silently turn a 150-minute exam into 200.
+
+   `pausedAt` freezes the clock exactly as the pomodoro's does: elapsed is measured to
+   the pause, not to now, so stepping away from a paused exam does not burn it (I6).
+   A backwards clock jump (NTP) clamps to 0 rather than going negative (I7).
+
+   Running out of time sets `exceeded` and nothing else. It does NOT submit: taking
+   the paper away mid-sentence would destroy an answer to enforce a rule this app has
+   no business enforcing. Past zero the countdown counts UP as "+01:00", because how
+   far over you went is information and a frozen 00:00 is not. */
+function calculateExamTimerState(startedAt, now, durationMin, mode, pausedAt) {
+  const limitMs = Math.max(0, (Number(durationMin) || 0) * 60000);
+  if (!startedAt) {
+    return { label: mode === 'down' ? formatExamClock(limitMs) : '00:00',
+             elapsedMs: 0, remainingMs: limitMs, exceeded: false };
+  }
+  const end = pausedAt ? Number(pausedAt) : Number(now);
+  let elapsedMs = end - Number(startedAt);
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+
+  const remainingMs = limitMs - elapsedMs;
+  const exceeded = limitMs > 0 && elapsedMs >= limitMs;
+  const label = mode === 'down'
+    ? (exceeded ? '+' + formatExamClock(-remainingMs) : formatExamClock(remainingMs))
+    : formatExamClock(elapsedMs);
+  return { label, elapsedMs, remainingMs, exceeded };
+}
+
+/* The model's own refusal channel. `isExamInfo: false` is NOT an error — retrying
+   cannot change what the PDF contains — so this returns a refusal the UI renders in
+   quiet ink with no Try again button. The refusal always carries a sentence: an empty
+   one is a dead end, and #22 exists because this app was full of them. */
+function parseExamFormatResponse(parsed) {
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, refusal: 'Claude sent back something unreadable.' };
+  }
+  if (parsed.isExamInfo === false) {
+    return { ok: false, refusal: String(parsed.reason || '').trim() ||
+      'That PDF does not look like an Informação-Prova.' };
+  }
+  const groups = Array.isArray(parsed.groups) ? parsed.groups : [];
+  if (groups.length === 0) {
+    return { ok: false, refusal: 'No Grupos found in that PDF — is it the right document?' };
+  }
+  const dur = Number(parsed.durationMin);
+  if (!Number.isFinite(dur) || dur < EXAM_MIN_DURATION || dur > EXAM_MAX_DURATION) {
+    return { ok: false, refusal: 'Could not read a sensible exam duration from that PDF.' };
+  }
+  return {
+    ok: true,
+    format: {
+      subject: String(parsed.subject || '').trim() || 'Exame',
+      code: String(parsed.code || ''),
+      year: String(parsed.year || ''),
+      durationMin: Math.round(dur),
+      // Not taken from the PDF. A national exam is 200 points; a model that read 137
+      // off a table misread the table, and trusting it would rescale every mark.
+      totalPoints: EXAM_TOTAL_POINTS,
+      groups: groups.map(g => ({
+        id: String(g.id || ''),
+        title: String(g.title || ''),
+        itemCount: Math.max(1, Number(g.itemCount) || 1),
+        // Anything this app cannot render is dropped rather than carried forward to
+        // become an item kind the exam screen has no input for.
+        kinds: Array.isArray(g.kinds) ? g.kinds.filter(k => EXAM_KINDS.indexOf(k) !== -1) : [],
+        points: Math.max(0, Number(g.points) || 0)
+      }))
+    }
+  };
+}
+
+function examPointsTotal(groups) {
+  return (Array.isArray(groups) ? groups : []).reduce((sum, g) =>
+    sum + (Array.isArray(g.items) ? g.items : [])
+      .reduce((s, it) => s + (Number(it.points) || 0), 0), 0);
+}
+
+/* THE 200-POINT GUARD. JSON Schema cannot express "the points of every item sum to
+   200" — there is no keyword for it. The model gets it right most of the time and
+   wrong some of the time, and a 190-point paper marks every answer 5% low with
+   nothing anywhere to notice. So we sum here, and refuse rather than rescale: a
+   silent rescale would hide that it happened. */
+function parseExamResponse(parsed) {
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, refusal: 'Claude sent back something unreadable.' };
+  }
+  const groups = Array.isArray(parsed.groups) ? parsed.groups : [];
+  if (groups.length === 0) {
+    return { ok: false, refusal: 'Claude returned an exam with no Grupos. Generating again usually fixes it.' };
+  }
+
+  const seen = {};
+  const clean = [];
+  for (let gi = 0; gi < groups.length; gi++) {
+    const g = groups[gi];
+    const items = Array.isArray(g.items) ? g.items : [];
+    const outItems = [];
+    for (let ii = 0; ii < items.length; ii++) {
+      const it = items[ii];
+      const id = String(it.id || '');
+      // Duplicate ids collide in `answers`, so two questions would share one answer
+      // and one of them would be marked against text written for the other.
+      if (!id || seen[id]) {
+        return { ok: false, refusal: 'Claude reused a question number, so the paper is unusable. Generating again usually fixes it.' };
+      }
+      seen[id] = true;
+
+      const kind = EXAM_KINDS.indexOf(it.kind) !== -1 ? it.kind : 'short';
+      // options/correct are meaningful ONLY for mc. The schema has to require them on
+      // every item (JSON Schema cannot make a field conditional on a sibling's value),
+      // so they arrive as noise on open items and are cleared here.
+      const options = (kind === 'mc' && Array.isArray(it.options)) ? it.options.map(String) : [];
+      const correct = kind === 'mc' ? Number(it.correct) : -1;
+      if (kind === 'mc' && (!Number.isInteger(correct) || correct < 0 || correct >= options.length)) {
+        return { ok: false, refusal: 'A multiple-choice question came back with no valid answer. Generating again usually fixes it.' };
+      }
+
+      outItems.push({
+        id: id, kind: kind, prompt: String(it.prompt || ''),
+        options: options, correct: correct,
+        points: Math.max(0, Number(it.points) || 0),
+        rubric: String(it.rubric || '')
+      });
+    }
+    if (outItems.length) {
+      clean.push({ id: String(g.id || ''), title: String(g.title || ''), items: outItems });
+    }
+  }
+
+  const total = examPointsTotal(clean);
+  if (total !== EXAM_TOTAL_POINTS) {
+    return { ok: false, refusal: 'Claude built a ' + total + '-point paper instead of ' +
+      EXAM_TOTAL_POINTS + '. Generating again usually fixes it.' };
+  }
+  return { ok: true, exam: { title: String(parsed.title || 'Exame'), groups: clean } };
+}
+
+/* Multiple choice is marked here, on the client, instantly and for free. Sending it
+   to the model would cost tokens and invite it to disagree with arithmetic. */
+function gradeMultipleChoice(exam, answers) {
+  const out = {};
+  const given = (answers && typeof answers === 'object') ? answers : {};
+  const groups = (exam && Array.isArray(exam.groups)) ? exam.groups : [];
+  groups.forEach(function (g) {
+    (g.items || []).forEach(function (it) {
+      if (it.kind !== 'mc') return;
+      const picked = given[it.id];
+      const answered = picked !== undefined && picked !== null && String(picked).trim() !== '';
+      const right = answered && Number(picked) === it.correct;
+      out[it.id] = {
+        points: right ? it.points : 0,
+        max: it.points,
+        comment: right ? 'Correct.' : 'Correct answer: ' + (it.options[it.correct] || '—')
+      };
+    });
+  });
+  return out;
+}
+
+/* Given a 15-point item and a good answer, Sonnet will sometimes return 18. It will
+   also sometimes skip an item, and sometimes invent an id. All three are real, and
+   all three are SILENT — an inflated mark looks exactly like an earned one.
+
+   A skipped item is filled with 0 and says so. That distinction matters: a genuine
+   zero is feedback, an unmarked item is a bug, and they must not look the same. */
+function parseGradingResponse(parsed, exam) {
+  const byId = {};
+  const groups = (exam && Array.isArray(exam.groups)) ? exam.groups : [];
+  groups.forEach(function (g) {
+    (g.items || []).forEach(function (it) { if (it.kind !== 'mc') byId[it.id] = it; });
+  });
+
+  const out = {};
+  const rows = (parsed && Array.isArray(parsed.items)) ? parsed.items : [];
+  rows.forEach(function (row) {
+    const it = byId[String(row && row.id)];
+    if (!it) return;                                   // hallucinated id — drop it
+    const raw = Number(row.points);
+    const points = Number.isFinite(raw) ? Math.min(it.points, Math.max(0, raw)) : 0;
+    out[it.id] = { points: points, max: it.points, comment: String(row.comment || '') };
+  });
+
+  Object.keys(byId).forEach(function (id) {
+    if (!out[id]) {
+      out[id] = { points: 0, max: byId[id].points, comment: 'Not marked — try grading again.' };
+    }
+  });
+  return out;
+}
+
+/* 200 points → the Portuguese 0-20 scale, to one decimal. Both halves are stored on
+   the record: keeping total200 means a future change to the rounding rule can
+   recompute old papers instead of stranding them.
+
+   Clamped to the paper's own total, so a grader that somehow over-awards across
+   several items cannot produce a 21. */
+function examScore(perItem, exam) {
+  const cap = examPointsTotal(exam && exam.groups) || EXAM_TOTAL_POINTS;
+  const map = (perItem && typeof perItem === 'object') ? perItem : {};
+  let sum = 0;
+  Object.keys(map).forEach(function (id) {
+    const p = Number(map[id] && map[id].points);
+    if (Number.isFinite(p)) sum += p;
+  });
+  const total200 = Math.min(cap, Math.max(0, sum));
+  return { total200: total200, grade20: Math.round((total200 / 10) * 10) / 10 };
+}
+
+/* Whitespace is not an answer. Counting "   " as answered would tell a student they
+   had finished a paper they had not started. */
+function examProgress(exam, answers) {
+  const given = (answers && typeof answers === 'object') ? answers : {};
+  const groups = (exam && Array.isArray(exam.groups)) ? exam.groups : [];
+  let answered = 0, total = 0;
+  groups.forEach(function (g) {
+    (g.items || []).forEach(function (it) {
+      total++;
+      const v = given[it.id];
+      if (v !== undefined && v !== null && String(v).trim() !== '') answered++;
+    });
+  });
+  return { answered: answered, total: total };
+}
+
+/* Copy before sorting: Array.prototype.sort mutates, and this runs on the library
+   array straight out of loadData(). */
+function sortExamsNewestFirst(list) {
+  return (Array.isArray(list) ? list.slice() : [])
+    .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+}
+
+/* ── END PURE exam */
+
+/* ----------------------------------------------------------------
    2. SM-2 SCHEDULER
    ----------------------------------------------------------------
    The classic spaced-repetition idea: after you see a card you rate
