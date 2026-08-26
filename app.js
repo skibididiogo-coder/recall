@@ -3457,7 +3457,47 @@ const API_MESSAGES = {
   529: 'Claude is overloaded right now. This is temporary — try again in a moment.'
 };
 
-function describeApiError(status, detail) {
+/* ── Feature #36. Exam Mode adds three network call sites and ZERO new error
+   handlers. #22 exists because the same 401/429/!ok block was copy-pasted at seven
+   sites, so 529 — the failure actually hit in the real world — was handled at none of
+   them. A fourth handler would undo that, and the next missing status would go
+   missing somewhere new that nobody thinks to look.
+
+   Two TABLES, one function. Resolution:
+       EXAM_SERVICE[service][code]  →  EXAM_MESSAGES[code]  →  API_MESSAGES[code]
+
+   Neither table can touch `retryable`. That stays derived from the status code by the
+   single rule below, because a table that could also flip retryability would be a
+   second mapper wearing the first one's clothes — and the thing that goes wrong is a
+   Try again button appearing on a rejected API key, which is a lie. */
+
+/* Exam-wide: codes the rest of the app essentially never sees. 413 only ever happens
+   here, because nothing else in Recall posts a whole PDF or a whole 200-point paper. */
+const EXAM_MESSAGES = {
+  400: 'Claude could not use what it was sent. The material or the PDF may be unreadable.',
+  413: 'That file is too large for Claude to read in one go. Try just the pages with the exam structure.'
+};
+
+/* Per-call refinements, only where the three genuinely differ. The difference that
+   matters is what the user is afraid of at that exact moment: mid-generation nothing
+   exists yet, but mid-marking they have just spent two hours writing, and the honest
+   thing to tell them is that it is already on disk. */
+const EXAM_SERVICE = {
+  format: {
+    400: 'Claude could not read that PDF. Is it the official Informação-Prova for your subject?'
+  },
+  exam: {
+    400: 'Claude could not build an exam from this deck. The material may be too thin.',
+    429: 'Rate limited while building your exam. Nothing was lost — wait a moment and try again.'
+  },
+  grade: {
+    429: 'Rate limited while marking. Your answers are saved — try again in a moment.',
+    529: 'Claude is overloaded. Your answers are saved — try again in a moment.',
+    500: 'Claude had a server error while marking. Your answers are saved — try again in a moment.'
+  }
+};
+
+function describeApiError(status, detail, service) {
   // Pre-flight: navigator.onLine already told us there is no connection, so we
   // can say so precisely instead of guessing from a failed fetch. Retryable by
   // definition — reconnecting IS the fix.
@@ -3467,7 +3507,12 @@ function describeApiError(status, detail) {
 
   const code = Number(status) || 0;   // undefined / null / 0 all mean "never got a response"
 
-  let message = API_MESSAGES[code];
+  let message;
+  if (service) {
+    const svc = EXAM_SERVICE[service];
+    message = (svc && svc[code]) || EXAM_MESSAGES[code];
+  }
+  if (!message) message = API_MESSAGES[code];
   if (!message) {
     // Unknown code: 5xx is treated as transient, 4xx as our problem to fix.
     message = code >= 500
@@ -3546,10 +3591,10 @@ function refusalHelp(kind) {
 /* ── 8B-impure ───────────────────────────────────────────────────
    Turns a fetch Response into a thrown Error carrying `.retryable`, so
    every call site fails the same way and the UI can decide what to offer. */
-async function apiError(res) {
+async function apiError(res, service) {
   let detail = '';
   try { const b = await res.json(); detail = b.error?.message || ''; } catch (e) {}
-  const { message, retryable } = describeApiError(res.status, detail);
+  const { message, retryable } = describeApiError(res.status, detail, service);
   const err = new Error(message);
   err.retryable = retryable;
   err.status = res.status;
@@ -6151,6 +6196,302 @@ async function onGenerateChart() {
     chartBusy = false;
     document.getElementById('chart-gen-btn').disabled = false;
   }
+}
+
+/* ----------------------------------------------------------------
+   9H. EXAM MODE (Claude API, structured output) — feature #36
+   ----------------------------------------------------------------
+   Three calls, but only TWO per exam:
+
+     callClaudeExamFormat(pdfText)     once per deck — reads the IAVE Informação-Prova
+     callClaudeExam(material, format)  per exam      — builds the paper
+     callClaudeGrade(exam, answers)    per submission — marks the open answers
+
+   Extracting the structure separately is what makes the mandatory PDF bearable: it is
+   uploaded once per deck, not once per exam. It is also the only place a wrong PDF can
+   be turned away, because that decision needs the document and nothing else.
+
+   Every one of the three re-validates on the client. The schema constrains SHAPE; it
+   cannot constrain "these numbers sum to 200", "these ids are unique", or "this mark is
+   not above what the item is worth". Those live in 1I and are not optional.
+   ---------------------------------------------------------------- */
+
+const FORMAT_SCHEMA = {
+  type: 'object',
+  properties: {
+    // The refusal channel. A holiday photo and a maths worksheet must both be turned
+    // away, and only the model can see which it is looking at.
+    isExamInfo:  { type: 'boolean' },
+    reason:      { type: 'string' },
+    subject:     { type: 'string' },
+    code:        { type: 'string' },
+    year:        { type: 'string' },
+    durationMin: { type: 'integer' },
+    totalPoints: { type: 'integer' },
+    groups: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id:        { type: 'string' },
+          title:     { type: 'string' },
+          itemCount: { type: 'integer' },
+          kinds:     { type: 'array', items: { type: 'string', enum: ['mc', 'short', 'long'] } },
+          points:    { type: 'integer' }
+        },
+        required: ['id', 'title', 'itemCount', 'kinds', 'points'],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ['isExamInfo', 'reason', 'subject', 'code', 'year', 'durationMin', 'totalPoints', 'groups'],
+  additionalProperties: false
+};
+
+const EXAM_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    groups: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id:    { type: 'string' },
+          title: { type: 'string' },
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id:      { type: 'string' },
+                kind:    { type: 'string', enum: ['mc', 'short', 'long'] },
+                prompt:  { type: 'string' },
+                // options and correct are meaningful only when kind is 'mc'. JSON Schema
+                // cannot make a field conditional on a sibling's value, so both are
+                // required on every item and cleared for open items in parseExamResponse.
+                options: { type: 'array', items: { type: 'string' } },
+                correct: { type: 'integer' },
+                points:  { type: 'integer' },
+                rubric:  { type: 'string' }
+              },
+              required: ['id', 'kind', 'prompt', 'options', 'correct', 'points', 'rubric'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['id', 'title', 'items'],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ['title', 'groups'],
+  additionalProperties: false
+};
+
+const GRADING_SCHEMA = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id:      { type: 'string' },
+          points:  { type: 'number' },
+          comment: { type: 'string' }
+        },
+        required: ['id', 'points', 'comment'],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ['items'],
+  additionalProperties: false
+};
+
+/* Read the official Informação-Prova. Once per deck — the result is cached on
+   deck.examFormat, so the PDF is never asked for again. */
+async function callClaudeExamFormat(pdfText) {
+  if (!navigator.onLine) throw offlineError();
+
+  const systemPrompt =
+    `You read a Portuguese IAVE "Informação-Prova" and extract the exam's STRUCTURE.\n` +
+    `STRICT RULES:\n` +
+    `1. If this is NOT an Informação-Prova (or an equivalent official exam-structure ` +
+    `document), set "isExamInfo": false and put ONE plain sentence in "reason" saying ` +
+    `what it looks like instead. Extract nothing else.\n` +
+    `2. Extract only what the document states. NEVER fill a gap from memory of other exams.\n` +
+    `3. "groups": one entry per Grupo, in order, with its item count, item kinds and cotação.\n` +
+    `4. "durationMin": the official duration in minutes.\n` +
+    `5. Unknown "code" or "year" → empty string. Never guess them.`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': getApiKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        max_tokens: 2048,
+        output_config: { format: { type: 'json_schema', schema: FORMAT_SCHEMA } },
+        system: systemPrompt,
+        messages: [{ role: 'user', content: 'Informação-Prova:\n\n' + pdfText }]
+      })
+    });
+  } catch (e) {
+    throw networkError();
+  }
+
+  if (!res.ok) throw await apiError(res, 'format');
+
+  const data = await res.json();
+  // A model-level refusal is not an error either: quiet ink, no Try again.
+  if (data.stop_reason === 'refusal') {
+    return { ok: false, refusal: 'Claude declined to read that document.' };
+  }
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw transientError('Claude sent back an empty answer. This usually works on a second attempt.');
+
+  let parsed;
+  try { parsed = JSON.parse(textBlock.text); }
+  catch (e) { throw transientError('Claude sent back something unreadable. This usually works on a second attempt.'); }
+  return parseExamFormatResponse(parsed);
+}
+
+/* Build the paper. The structure and the material are handed over separately and
+   labelled, so "follow this shape" and "use only this content" cannot blur together. */
+async function callClaudeExam(material, format) {
+  if (!navigator.onLine) throw offlineError();
+
+  const systemPrompt =
+    `You write a mock Portuguese national exam from a student's own study material.\n` +
+    `STRICT RULES:\n` +
+    `1. Use ONLY the material — no outside knowledge, even if you know more.\n` +
+    `2. Write in the SAME language as the material.\n` +
+    `3. Follow the supplied STRUCTURE exactly: these Grupos, these item counts, these ` +
+    `cotações, this mix of item kinds. Do not add or drop a Grupo.\n` +
+    `4. The "points" of every item must total EXACTLY 200 across the whole paper.\n` +
+    `5. Every item needs a "rubric". For "mc" it names the correct option. For "short" ` +
+    `and "long" it is IAVE-style descriptive performance levels, e.g. "2 pontos: ` +
+    `identifica o conceito. 4 pontos: identifica e justifica com um exemplo do texto."\n` +
+    `6. "mc" items: 4 options, "correct" is the 0-based index. Non-mc items: ` +
+    `"options": [], "correct": -1.\n` +
+    `7. Thin material → say so. Never pad, and never invent content the material lacks.`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': getApiKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        // The highest ceiling in the app by a wide margin. A 200-point paper carries a
+        // rubric on every item; truncation arrives as unparseable JSON and reads to the
+        // user as a transient error, which is the most misleading failure available.
+        max_tokens: 16384,
+        output_config: { format: { type: 'json_schema', schema: EXAM_SCHEMA } },
+        system: systemPrompt,
+        messages: [{ role: 'user', content:
+          'STRUCTURE (from the official Informação-Prova):\n' + JSON.stringify(format, null, 2) +
+          '\n\n---\n\nMATERIAL:\n\n' + material }]
+      })
+    });
+  } catch (e) {
+    throw networkError();
+  }
+
+  if (!res.ok) throw await apiError(res, 'exam');
+
+  const data = await res.json();
+  if (data.stop_reason === 'refusal') {
+    return { ok: false, refusal: 'Claude declined to build an exam from this material.' };
+  }
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw transientError('Claude sent back an empty answer. This usually works on a second attempt.');
+
+  let parsed;
+  try { parsed = JSON.parse(textBlock.text); }
+  catch (e) { throw transientError('Claude sent back something unreadable. This usually works on a second attempt.'); }
+  return parseExamResponse(parsed);
+}
+
+/* Mark the open answers. Multiple choice never leaves the browser — it is already
+   marked, and sending it would spend tokens inviting the model to disagree with
+   arithmetic it cannot improve on. */
+async function callClaudeGrade(exam, answers) {
+  if (!navigator.onLine) throw offlineError();
+
+  const given = (answers && typeof answers === 'object') ? answers : {};
+  const open = [];
+  ((exam && exam.groups) || []).forEach(function (g) {
+    (g.items || []).forEach(function (it) {
+      if (it.kind === 'mc') return;
+      open.push({ id: it.id, prompt: it.prompt, rubric: it.rubric,
+                  maxPoints: it.points, answer: String(given[it.id] || '') });
+    });
+  });
+  // Nothing to mark is not a failure: a paper of pure multiple choice is fully graded
+  // by gradeMultipleChoice, and a needless round trip would only add a way to fail.
+  if (open.length === 0) return {};
+
+  const systemPrompt =
+    `You mark open answers on a Portuguese national exam, as an IAVE examiner would.\n` +
+    `STRICT RULES:\n` +
+    `1. Mark ONLY against the item's "rubric". Do not invent criteria it does not name.\n` +
+    `2. Award partial credit at the rubric's own performance levels — a named level, ` +
+    `not a feeling.\n` +
+    `3. "points" must be between 0 and that item's "maxPoints", inclusive.\n` +
+    `4. A blank answer is 0.\n` +
+    `5. "comment": one or two sentences, in the language of the answer, saying what ` +
+    `earned the mark and what would have earned more. Address the student directly.\n` +
+    `6. Return one entry for EVERY item you were given. Never skip one.`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': getApiKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        max_tokens: 8192,
+        output_config: { format: { type: 'json_schema', schema: GRADING_SCHEMA } },
+        system: systemPrompt,
+        messages: [{ role: 'user', content: JSON.stringify({ items: open }, null, 2) }]
+      })
+    });
+  } catch (e) {
+    throw networkError();
+  }
+
+  if (!res.ok) throw await apiError(res, 'grade');
+
+  const data = await res.json();
+  if (data.stop_reason === 'refusal') {
+    throw transientError('Claude declined to mark this paper. Your answers are saved — try again.');
+  }
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw transientError('Claude sent back an empty answer. Your answers are saved — try again.');
+
+  let parsed;
+  try { parsed = JSON.parse(textBlock.text); }
+  catch (e) { throw transientError('Claude sent back something unreadable. Your answers are saved — try again.'); }
+  return parseGradingResponse(parsed, exam);
 }
 
 /* ----------------------------------------------------------------
