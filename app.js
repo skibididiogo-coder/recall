@@ -6542,6 +6542,24 @@ let examPending = null;
 let examPdfText = '';
 let examBusy = false;
 
+/* What the exam is generated FROM. Prefers the raw imported text, because a paper built
+   from the material itself beats one built from flashcards someone already summarised.
+   Falls back to the summary plus the cards, which is all a hand-built deck has. */
+function examMaterial(deck, cards) {
+  if (!deck) return '';
+  const source = typeof deck.source === 'string' ? deck.source.trim() : '';
+  if (source) return capSource(source).text;
+
+  const summary = typeof deck.summary === 'string' ? deck.summary.trim() : '';
+  const list = Array.isArray(cards) ? cards.filter(c => c && c.front && c.back) : [];
+  const parts = [];
+  if (summary) parts.push('Summary:\n' + summary);
+  if (list.length > 0) {
+    parts.push('Flashcards:\n' + list.map(c => 'Q: ' + c.front + '\nA: ' + c.back).join('\n\n'));
+  }
+  return capSource(parts.join('\n\n')).text;
+}
+
 function getExam(id) { return (loadData().exams || []).find(e => e.id === id) || null; }
 
 function saveExam(next) {
@@ -6676,9 +6694,15 @@ async function onGenerateExam() {
   const deck = getDeck(currentDeckId);
   if (!deck || !deck.examFormat) return;
 
-  const material = deckContextText(deck);
+  // Same material the other AI features read, in the same order of preference: the
+  // imported source text if there is one, otherwise the summary plus the cards. Written
+  // as its own function rather than reusing buildTableContext so a change to the table's
+  // context rules cannot silently change what an exam is built from.
+  const material = examMaterial(deck, loadData().cards.filter(c => c.deckId === deck.id));
   if (!material.trim()) {
-    setExamGenerateStatus('This deck has no material yet — import some text or a PDF first.', 'error');
+    setExamGenerateStatus(
+      'This deck has no material yet. Import some text or a PDF into it first — an exam is ' +
+      'built from what the deck contains, not from the subject name.', 'error');
     return;
   }
 
