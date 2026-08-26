@@ -2827,6 +2827,7 @@ function goDeck(deckId) {
 
   fillLangSelect(document.getElementById('deck-lang'), deck.lang);
   refreshSpeechUi();
+  renderExamHistory(deckId);   // feature #36
 
   renderCards();
   showScreen('deck');
@@ -6492,6 +6493,533 @@ async function callClaudeGrade(exam, answers) {
   try { parsed = JSON.parse(textBlock.text); }
   catch (e) { throw transientError('Claude sent back something unreadable. Your answers are saved — try again.'); }
   return parseGradingResponse(parsed, exam);
+}
+
+/* ── 9H-screen. The Exam Mode screens (feature #36) ───────────────
+   Three screens: setup (the mandatory PDF), the paper itself, and the marking.
+
+   Everything an LLM wrote — prompts, options, rubrics, grader comments, the subject
+   read off the PDF — goes through escapeHtml. The grader's comment is the one most
+   easily forgotten because it arrives last and reads like a system message. It is not. */
+
+let currentExamId = '';
+let examClockMode = 'up';       // 'up' = elapsed (default) | 'down' = remaining
+let examClockHandle = null;
+let examSaveHandle = null;
+/* Write-behind buffer. Every pending change accumulates HERE and is merged into a
+   freshly-read record when the debounce fires.
+
+   The bug this replaced (found in a screenshot on 2026-08-26, with 38 checks green):
+   each answer used to read the exam from storage, add itself, and schedule a save.
+   Two answers in quick succession meant the second read the record BEFORE the first
+   had written, then cancelled the first's save — so the first answer was silently
+   dropped. In a real sitting that is lost marks, and nothing would ever report it. */
+let examPending = null;
+let examPdfText = '';
+let examBusy = false;
+
+function getExam(id) { return (loadData().exams || []).find(e => e.id === id) || null; }
+
+function saveExam(next) {
+  const data = loadData();
+  saveData({ ...data, exams: (data.exams || []).map(e => e.id === next.id ? next : e) });
+}
+
+/* ── Setup ── */
+
+function goExamForDeck() {
+  const deck = getDeck(currentDeckId);
+  if (!deck) { goDecks(); return; }
+  examPdfText = '';
+  document.getElementById('exam-pdf').value = '';
+  document.getElementById('exam-setup-tag').textContent = deck.tag || 'Exam Mode';
+  setExamFormatStatus('');
+  setExamGenerateStatus('');
+  setCrumb(deck.name + ' — Exam');
+  setActiveTab(null);
+  showScreen('exam-setup');
+  renderExamFormat();
+}
+
+function setExamFormatStatus(msg, kind, retry) { setArtStatus('exam-format-status', msg, kind, retry); }
+function setExamGenerateStatus(msg, kind, retry) { setArtStatus('exam-generate-status', msg, kind, retry); }
+
+/* Reuses the existing PDF reader wholesale — pdfjsLib, parsePageRange, capSource,
+   pdfErrorMessage. A second page-range parser would be a maintenance bug waiting. */
+async function onExamPdfChosen(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+
+  if (typeof pdfjsLib === 'undefined') {
+    setExamFormatStatus('PDF reader didn’t load — check your connection and refresh.', 'error');
+    return;
+  }
+  setExamFormatStatus('Reading PDF…', 'busy');
+  let text = '';
+  try {
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pages = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      pages.push(content.items.map(it => it.str).join(' '));
+    }
+    text = capSource(pages.join('\n\n')).text;
+  } catch (err) {
+    setExamFormatStatus(pdfErrorMessage(err), 'error');
+    return;
+  }
+  examPdfText = text;
+  await extractExamFormat();
+}
+
+async function extractExamFormat() {
+  if (!examPdfText) return;
+  setExamFormatStatus('Reading the exam structure…', 'busy');
+  let res;
+  try {
+    res = await callClaudeExamFormat(examPdfText);
+  } catch (err) {
+    // Try again only when retrying could actually help — never on a rejected key.
+    setExamFormatStatus(err.message, 'error', err.retryable ? extractExamFormat : undefined);
+    return;
+  }
+  if (!res.ok) {
+    // A refusal is not an error: quiet ink, no Try again, because retrying cannot
+    // change what the PDF contains. It names what the document lacks and where to
+    // find the right one.
+    const el = document.getElementById('exam-format-status');
+    el.className = 'gen-status note';
+    el.innerHTML = `<div class="refusal-why">${escapeHtml(res.refusal)}</div>` +
+      `<div class="refusal-needs">Exam Mode needs the official Informação-Prova for your ` +
+      `subject — it is the only thing that knows the real Grupos and cotações. ` +
+      `Download it from iave.pt and try that file.</div>`;
+    return;
+  }
+  const deck = getDeck(currentDeckId);
+  if (!deck) return;
+  saveData({ ...loadData(), decks: loadData().decks.map(d =>
+    d.id === currentDeckId ? { ...d, examFormat: { ...res.format, sourceName: 'Informação-Prova',
+                                                   extractedAt: Date.now() } } : d) });
+  setExamFormatStatus('Structure read — check it below, then generate.');
+  renderExamFormat();
+}
+
+/* Show the extracted structure back before generating anything. The PDF is the one
+   input a student cannot sanity-check by reading the output. */
+function renderExamFormat() {
+  const deck = getDeck(currentDeckId);
+  const wrap = document.getElementById('exam-format-summary');
+  const row = document.getElementById('exam-generate-row');
+  const fmt = deck && deck.examFormat;
+  if (!fmt) { wrap.innerHTML = ''; row.style.display = 'none'; return; }
+
+  const meta = [fmt.code && ('Prova ' + fmt.code), fmt.year, fmt.durationMin + ' min']
+    .filter(Boolean).join(' · ');
+  wrap.innerHTML = `
+    <div class="exam-format-card">
+      <div class="exam-format-head">
+        <span class="exam-format-subject">${escapeHtml(fmt.subject)}</span>
+        <span class="exam-format-meta">${escapeHtml(meta)}</span>
+      </div>
+      <div class="exam-format-groups">
+        ${fmt.groups.map(g => `
+          <div class="exam-format-row">
+            <span>${escapeHtml(g.title || g.id)}
+              <span class="kinds">${escapeHtml(g.itemCount + ' items · ' + (g.kinds.join(', ') || '—'))}</span>
+            </span>
+            <span class="pts">${escapeHtml(String(g.points))} pts</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  row.style.display = 'flex';
+}
+
+async function onGenerateExam() {
+  if (examBusy) return;
+  const deck = getDeck(currentDeckId);
+  if (!deck || !deck.examFormat) return;
+
+  const material = deckContextText(deck);
+  if (!material.trim()) {
+    setExamGenerateStatus('This deck has no material yet — import some text or a PDF first.', 'error');
+    return;
+  }
+
+  examBusy = true;
+  document.getElementById('exam-generate-btn').disabled = true;
+  setExamGenerateStatus('Building your exam… this one takes a while.', 'busy');
+
+  let res;
+  try {
+    res = await callClaudeExam(material, deck.examFormat);
+  } catch (err) {
+    examBusy = false;
+    document.getElementById('exam-generate-btn').disabled = false;
+    setExamGenerateStatus(err.message, 'error', err.retryable ? onGenerateExam : undefined);
+    return;
+  }
+  examBusy = false;
+  document.getElementById('exam-generate-btn').disabled = false;
+
+  if (!res.ok) {
+    // The 200-point guard lands here. Retrying genuinely does fix it, so this one
+    // keeps its button.
+    setExamGenerateStatus(res.refusal, 'error', onGenerateExam);
+    return;
+  }
+
+  const data = loadData();
+  const exam = {
+    id: newId('exam'), deckId: deck.id, subject: deck.examFormat.subject,
+    createdAt: Date.now(), durationMin: deck.examFormat.durationMin,
+    title: res.exam.title, groups: res.exam.groups,
+    answers: {}, startedAt: null, elapsedMs: 0, exceeded: false, pausedAt: null, result: null
+  };
+  saveData({ ...data, exams: [...(data.exams || []), exam] });
+  setExamGenerateStatus('');
+  openExam(exam.id);
+}
+
+/* ── The paper ── */
+
+function openExam(examId) {
+  const exam = getExam(examId);
+  if (!exam) { goDeck(currentDeckId); return; }
+  flushExamSave();          // anything still pending belongs to the PREVIOUS paper
+  currentExamId = examId;
+  currentDeckId = exam.deckId;
+  examClockMode = 'up';
+  setCrumb(exam.subject + ' — Exam');
+  setActiveTab(null);
+  showScreen('exam');
+  renderExam();
+  startExamClock();
+}
+
+function renderExam() {
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+
+  document.getElementById('exam-subject').textContent = exam.subject || 'Exame';
+  document.getElementById('exam-title').textContent = exam.title || 'Exame';
+  document.getElementById('exam-start-btn').style.display = exam.startedAt ? 'none' : '';
+  document.getElementById('exam-pause-btn').textContent = exam.pausedAt ? 'Resume' : 'Pause';
+  setArtStatus('exam-submit-status', '');
+
+  let n = 0;
+  document.getElementById('exam-body').innerHTML = exam.groups.map(g => {
+    const pts = g.items.reduce((sum, it) => sum + it.points, 0);
+    const items = g.items.map(it => { n++; return examItemHtml(it, n, exam.answers[it.id]); }).join('');
+    return `<section class="exam-group">
+      <div class="exam-group-head">
+        <h2 class="exam-group-title">${escapeHtml(g.title || g.id)}</h2>
+        <span class="exam-group-points">${escapeHtml(String(pts))} pontos</span>
+      </div>
+      ${items}
+    </section>`;
+  }).join('');
+
+  wireExamInputs();
+  renderExamClockMode();
+  renderExamProgress();
+  renderExamClock();
+}
+
+function examItemHtml(item, n, answer) {
+  const given = answer === undefined ? '' : String(answer);
+  let input;
+  if (item.kind === 'mc') {
+    input = `<div class="exam-options" role="radiogroup" aria-label="Options">` +
+      item.options.map((opt, i) => `
+        <label class="exam-option">
+          <input type="radio" name="exam-${escapeHtml(item.id)}" value="${i}"
+                 data-item="${escapeHtml(item.id)}"${String(i) === given ? ' checked' : ''}>
+          <span>${escapeHtml(opt)}</span>
+        </label>`).join('') + `</div>`;
+  } else if (item.kind === 'short') {
+    input = `<div class="exam-answer"><input type="text" data-item="${escapeHtml(item.id)}"
+      value="${escapeHtml(given)}" placeholder="Your answer"></div>`;
+  } else {
+    input = `<div class="exam-answer"><textarea data-item="${escapeHtml(item.id)}"
+      placeholder="Your answer">${escapeHtml(given)}</textarea></div>`;
+  }
+  return `<article class="exam-item">
+    <div class="exam-item-head">
+      <span class="exam-item-n">${n}.</span>
+      <div class="exam-item-prompt">${escapeHtml(item.prompt)}</div>
+      <span class="exam-item-points">${escapeHtml(String(item.points))} pts</span>
+    </div>
+    ${input}
+  </article>`;
+}
+
+/* Answers autosave on a debounce. Closing the tab mid-exam must not cost the paper —
+   the same localStorage fragility this project has been closing since #19. */
+function wireExamInputs() {
+  document.querySelectorAll('#exam-body [data-item]').forEach(el => {
+    const handler = () => onExamAnswer(el.getAttribute('data-item'), el.value);
+    if (el.type === 'radio') el.onchange = handler; else el.oninput = handler;
+  });
+}
+
+function queueExamSave(patch) {
+  const prev = examPending || {};
+  examPending = { ...prev, ...patch,
+                  answers: { ...(prev.answers || {}), ...(patch.answers || {}) } };
+  clearTimeout(examSaveHandle);
+  examSaveHandle = setTimeout(flushExamSave, 400);
+}
+
+function flushExamSave() {
+  clearTimeout(examSaveHandle);
+  const pending = examPending;
+  examPending = null;
+  if (!pending) return;
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+  // Read fresh, merge, write. Never hold a stale copy across the debounce.
+  saveExam({ ...exam, ...pending, answers: { ...exam.answers, ...(pending.answers || {}) } });
+}
+
+function onExamAnswer(itemId, value) {
+  queueExamSave({ answers: { [itemId]: String(value) } });
+  renderExamProgress();
+}
+
+/* The DOM is the truth while the screen is open — it is ahead of both storage and the
+   buffer between keystrokes. Submit reads through this too, so a debounce that has not
+   fired yet can never cost an answer. */
+function readExamAnswers() {
+  const exam = getExam(currentExamId);
+  const out = { ...(exam ? exam.answers : {}), ...((examPending && examPending.answers) || {}) };
+  document.querySelectorAll('#exam-body [data-item]').forEach(el => {
+    const id = el.getAttribute('data-item');
+    if (el.type === 'radio') { if (el.checked) out[id] = el.value; }
+    else out[id] = el.value;
+  });
+  return out;
+}
+
+function renderExamProgress() {
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+  const p = examProgress(exam, readExamAnswers());
+  document.getElementById('exam-progress').textContent = p.answered + ' / ' + p.total + ' answered';
+}
+
+/* ── The clock ── */
+
+function onStartExam() {
+  const exam = getExam(currentExamId);
+  if (!exam || exam.startedAt) return;
+  exam.startedAt = Date.now();
+  exam.pausedAt = null;
+  saveExam(exam);
+  document.getElementById('exam-start-btn').style.display = 'none';
+  renderExamClock();
+}
+
+/* One place, called by both the toggle and the render. Setting these only inside the
+   toggle left them stale whenever the screen was reopened — the clock counted up while
+   the label under it still read REMAINING. A clock that lies about which direction it
+   is counting is worse than no clock. */
+function renderExamClockMode() {
+  document.getElementById('exam-mode-btn').textContent = examClockMode === 'up' ? 'Count down' : 'Count up';
+  document.getElementById('exam-clock-mode').textContent = examClockMode === 'up' ? 'Elapsed' : 'Remaining';
+}
+
+function onToggleExamClockMode() {
+  examClockMode = examClockMode === 'up' ? 'down' : 'up';
+  renderExamClockMode();
+  renderExamClock();
+}
+
+/* Pausing REBASES startedAt on resume, so the paused stretch is simply not counted.
+   Storing an accumulated total instead would need a second field and a migration for
+   something a rebase does exactly. */
+function onToggleExamPause() {
+  const exam = getExam(currentExamId);
+  if (!exam || !exam.startedAt) return;
+  if (exam.pausedAt) {
+    exam.startedAt = exam.startedAt + (Date.now() - exam.pausedAt);
+    exam.pausedAt = null;
+  } else {
+    exam.pausedAt = Date.now();
+  }
+  saveExam(exam);
+  document.getElementById('exam-pause-btn').textContent = exam.pausedAt ? 'Resume' : 'Pause';
+  renderExamClock();
+}
+
+function startExamClock() {
+  clearInterval(examClockHandle);
+  examClockHandle = setInterval(renderExamClock, 1000);
+}
+
+function renderExamClock() {
+  const screen = document.getElementById('screen-exam');
+  // Self-clearing rather than a hook inside showScreen: one less shared function to
+  // break, and a stray interval cannot outlive the screen.
+  if (!screen || !screen.classList.contains('active')) { clearInterval(examClockHandle); return; }
+
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+  const st = calculateExamTimerState(exam.startedAt, Date.now(), exam.durationMin,
+                                     examClockMode, exam.pausedAt);
+
+  const clock = document.getElementById('exam-clock');
+  clock.textContent = st.label;
+  clock.classList.toggle('over', st.exceeded);
+
+  const over = document.getElementById('exam-overtime');
+  over.classList.toggle('show', st.exceeded);
+  if (st.exceeded) {
+    // Said in words, not colour alone — WCAG 1.4.1, and the #22 habit.
+    over.textContent = 'Over time by ' + formatExamClock(-st.remainingMs) +
+      '. Nothing has been submitted — finish when you are ready.';
+  }
+
+  // Through the same buffer as the answers. Its own timeout would cancel theirs —
+  // which is the bug above, wearing a different hat.
+  if (st.exceeded !== exam.exceeded || (exam.startedAt && exam.elapsedMs !== st.elapsedMs)) {
+    queueExamSave({ exceeded: st.exceeded, elapsedMs: st.elapsedMs });
+  }
+}
+
+/* ── Submit and mark ── */
+
+async function onSubmitExam() {
+  if (examBusy) return;
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+
+  // 0. Take everything on screen, including a debounce that has not fired yet.
+  exam.answers = readExamAnswers();
+  examPending = null;
+  clearTimeout(examSaveHandle);
+
+  // 1. Multiple choice, on the client, instantly and for free.
+  const mc = gradeMultipleChoice(exam, exam.answers);
+
+  // 2. SAVE BEFORE MARKING. This is the safety property of the whole feature: an API
+  //    failure now cannot cost an hour of writing, because the answers are already on
+  //    disk and Try again marks the record that is already there.
+  exam.result = null;
+  saveExam(exam);
+
+  examBusy = true;
+  setArtStatus('exam-submit-status', 'Marking your answers…', 'busy');
+
+  let open;
+  try {
+    open = await callClaudeGrade(exam, exam.answers);
+  } catch (err) {
+    examBusy = false;
+    setArtStatus('exam-submit-status',
+      err.message, 'error', err.retryable ? onSubmitExam : undefined);
+    return;
+  }
+  examBusy = false;
+
+  const perItem = { ...mc, ...open };
+  const score = examScore(perItem, exam);
+  const fresh = getExam(currentExamId);
+  fresh.result = { perItem, total200: score.total200, grade20: score.grade20, gradedAt: Date.now() };
+  saveExam(fresh);
+  setArtStatus('exam-submit-status', '');
+  goExamResult(fresh.id);
+}
+
+function goExamResult(examId) {
+  const exam = getExam(examId);
+  if (!exam) { goDeck(currentDeckId); return; }
+  currentExamId = examId;
+  currentDeckId = exam.deckId;
+  setCrumb(exam.subject + ' — Result');
+  setActiveTab(null);
+  showScreen('exam-result');
+  renderExamResult();
+}
+
+function renderExamResult() {
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+  const res = exam.result;
+
+  document.getElementById('exam-grade20').textContent = res ? res.grade20.toFixed(1) : '—';
+  document.getElementById('exam-total200').textContent =
+    (res ? res.total200 : '—') + ' / ' + EXAM_TOTAL_POINTS;
+  document.getElementById('exam-result-meta').textContent =
+    exam.subject + (exam.elapsedMs ? ' · ' + formatExamClock(exam.elapsedMs) : '');
+
+  if (!res) {
+    document.getElementById('exam-result-body').innerHTML = '';
+    setArtStatus('exam-regrade-status', 'This paper was answered but never marked.',
+                 'error', () => { openExam(exam.id); });
+    return;
+  }
+  setArtStatus('exam-regrade-status', '');
+
+  let n = 0;
+  document.getElementById('exam-result-body').innerHTML = exam.groups.map(g => {
+    const items = g.items.map(it => {
+      n++;
+      const mark = res.perItem[it.id] || { points: 0, max: it.points, comment: '' };
+      const given = String(exam.answers[it.id] === undefined ? '' : exam.answers[it.id]).trim();
+      const shown = it.kind === 'mc'
+        ? (given === '' ? '' : (it.options[Number(given)] || given))
+        : given;
+      const cls = mark.points === mark.max ? ' full' : (mark.points === 0 ? ' zero' : '');
+      const how = it.kind === 'mc' ? 'Marked instantly' : 'Marked by AI against the rubric';
+      return `<article class="exam-mark">
+        <div class="exam-mark-head">
+          <span class="exam-item-n">${n}.</span>
+          <div class="exam-item-prompt">${escapeHtml(it.prompt)}</div>
+          <span class="exam-mark-score${cls}">${escapeHtml(String(mark.points))} / ${escapeHtml(String(mark.max))}</span>
+        </div>
+        <div class="exam-mark-how">${escapeHtml(how)}</div>
+        <div class="exam-mark-yours${shown ? '' : ' blank'}">${shown ? escapeHtml(shown) : 'Left blank'}</div>
+        ${mark.comment ? `<div class="exam-mark-comment">${escapeHtml(mark.comment)}</div>` : ''}
+        ${it.rubric ? `<details class="exam-rubric"><summary>Marking criteria</summary>
+          <p>${escapeHtml(it.rubric)}</p></details>` : ''}
+      </article>`;
+    }).join('');
+    return `<section class="exam-group">
+      <div class="exam-group-head">
+        <h2 class="exam-group-title">${escapeHtml(g.title || g.id)}</h2>
+      </div>
+      ${items}
+    </section>`;
+  }).join('');
+}
+
+/* ── Past sittings, on the deck screen ── */
+
+function renderExamHistory(deckId) {
+  const list = sortExamsNewestFirst((loadData().exams || []).filter(e => e.deckId === deckId));
+  const label = document.getElementById('exam-history-label');
+  const wrap = document.getElementById('exam-history');
+  if (!label || !wrap) return;
+
+  label.style.display = list.length ? '' : 'none';
+  document.getElementById('exam-history-count').textContent = String(list.length);
+  wrap.innerHTML = list.map(e => {
+    const graded = !!e.result;
+    return `<div class="exam-history-row">
+      <div class="exam-history-main">
+        <div class="exam-history-title">${escapeHtml(e.title || e.subject || 'Exame')}</div>
+        <div class="exam-history-when">${escapeHtml(new Date(e.createdAt).toLocaleDateString())}</div>
+      </div>
+      <span class="exam-history-grade${graded ? '' : ' pending'}">${
+        graded ? escapeHtml(e.result.grade20.toFixed(1) + ' / 20') : 'Not marked yet'}</span>
+      <button class="btn btn-outline btn-sm" onclick="${graded
+        ? `goExamResult('${escapeHtml(e.id)}')` : `openExam('${escapeHtml(e.id)}')`}">${
+        graded ? 'Review' : 'Continue'}</button>
+    </div>`;
+  }).join('');
 }
 
 /* ----------------------------------------------------------------

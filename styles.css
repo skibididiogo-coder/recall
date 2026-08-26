@@ -860,3 +860,137 @@ li.tl-item:last-child{padding-bottom:0}
 .field-pair input[type=number]{-moz-appearance:textfield;appearance:textfield}
 .field-pair input[type=number]::-webkit-outer-spin-button,
 .field-pair input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+/* ── Exam Mode (feature #36) ───────────────────────────────────────
+   Monochrome Futurist, unchanged: no hue except the status tokens, and those only
+   where something genuinely matters — the clock going over, a mark below half.
+   Surfaces take --r (4px); anything pill-shaped takes --r-full. Nothing in between. */
+
+.exam-lede{max-width:62ch;font-size:15px;line-height:1.6;color:var(--ink-2);margin-bottom:24px;text-wrap:pretty}
+.exam-lede strong{color:var(--ink);font-weight:600}
+.exam-panel{border-radius:var(--r)}
+.mono-inline{font-family:var(--font-mono);font-size:0.92em}
+.exam-generate-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:24px}
+.exam-generate-row .gen-status{flex:1;min-width:220px}
+
+/* The extracted structure, shown back before anything is generated: the PDF is the
+   one input the student cannot check by reading the output. */
+.exam-format-card{background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r);padding:20px 22px;margin-top:20px}
+.exam-format-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.exam-format-subject{font-family:var(--font-display);font-weight:500;font-size:19px;letter-spacing:-0.01em}
+.exam-format-meta{font-family:var(--font-mono);font-size:12px;color:var(--ink-3)}
+.exam-format-groups{display:flex;flex-direction:column;gap:8px}
+.exam-format-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding:9px 0;border-top:1px solid var(--border);font-size:14px}
+.exam-format-row:first-child{border-top:none}
+.exam-format-row .kinds{font-size:12px;color:var(--ink-3)}
+.exam-format-row .pts{font-family:var(--font-mono);font-size:13px;color:var(--ink-2)}
+
+/* ── The exam bar. Sticky, because the clock is the one thing you must be able to
+   see from anywhere in a 200-point paper. Same blur idiom as the app nav. ── */
+.exam-bar{position:sticky;top:57px;z-index:20;display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+  background:rgba(240,240,238,0.86);backdrop-filter:blur(10px);
+  border:1px solid var(--border);border-radius:var(--r);padding:14px 18px;margin-bottom:14px}
+.exam-bar-id{min-width:0;flex:1}
+.exam-bar-title{font-family:var(--font-display);font-weight:500;font-size:17px;letter-spacing:-0.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.exam-bar-clock{display:flex;flex-direction:column;align-items:center;gap:2px}
+/* tabular-nums is the point: without it every digit change shifts the layout a pixel
+   and the whole bar shivers once a second. */
+.exam-clock{font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  font-size:26px;line-height:1;letter-spacing:-0.02em;color:var(--ink);transition:color 200ms}
+.exam-clock.over{color:var(--error)}
+.exam-clock-mode{font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-3)}
+.exam-bar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.exam-progress{font-family:var(--font-mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+
+.exam-overtime{display:none;align-items:center;gap:10px;background:var(--error-bg);
+  border:1px solid rgba(209,36,47,0.28);border-radius:var(--r);
+  padding:11px 16px;margin-bottom:12px;font-size:14px;color:var(--error);font-weight:500}
+.exam-overtime.show{display:flex}
+.exam-pause-note{font-size:12.5px;line-height:1.55;color:var(--ink-3);max-width:70ch;margin-bottom:22px}
+
+/* ── Grupos ── */
+.exam-group{margin-bottom:32px}
+.exam-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+  padding-bottom:10px;margin-bottom:18px;border-bottom:1px solid var(--ink)}
+.exam-group-title{font-family:var(--font-display);font-weight:500;font-size:20px;letter-spacing:-0.01em}
+.exam-group-points{font-family:var(--font-mono);font-size:13px;color:var(--ink-2)}
+
+.exam-item{background:#fff;border:1px solid var(--border);border-radius:var(--r);
+  padding:22px 24px;margin-bottom:14px}
+.exam-item-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
+.exam-item-n{font-family:var(--font-mono);font-size:12px;color:var(--ink-3);flex-shrink:0;padding-top:3px;min-width:26px}
+.exam-item-prompt{flex:1;font-size:15.5px;line-height:1.55;text-wrap:pretty}
+.exam-item-points{flex-shrink:0;font-family:var(--font-mono);font-size:11px;color:var(--ink-2);
+  background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-full);padding:3px 11px;white-space:nowrap}
+
+.exam-options{display:flex;flex-direction:column;gap:2px;margin-left:26px}
+.exam-option{display:flex;align-items:flex-start;gap:11px;padding:10px 12px;border-radius:var(--r);
+  cursor:pointer;transition:background 120ms}
+.exam-option:hover{background:var(--surface-1)}
+.exam-option input{margin-top:3px;accent-color:var(--ink);flex-shrink:0}
+.exam-option span{font-size:14.5px;line-height:1.5}
+.exam-option:focus-within{background:var(--surface-1);outline:2px solid var(--ink);outline-offset:-2px}
+
+.exam-answer{margin-left:26px}
+.exam-answer textarea,.exam-answer input[type=text]{width:100%;padding:12px 14px;font-size:14.5px;line-height:1.6;
+  background:var(--bg);border:1px solid var(--border);border-radius:var(--r);outline:none;
+  transition:border-color 120ms,box-shadow 120ms,background 120ms}
+.exam-answer textarea{min-height:130px;resize:vertical}
+.exam-answer textarea:focus,.exam-answer input[type=text]:focus{background:#fff;border-color:var(--ink);
+  box-shadow:0 0 0 3px rgba(10,10,10,0.06)}
+.exam-foot{display:flex;justify-content:flex-end;padding:8px 0 40px}
+
+/* ── Results. The dark panel is the system's "this matters" move, spent here and
+   nowhere else on these screens. ── */
+.exam-disclaimer{background:var(--warning-bg);border:1px solid rgba(154,103,0,0.3);border-radius:var(--r);
+  padding:16px 18px;margin-bottom:22px;font-size:14px;line-height:1.6;color:#6b4800;max-width:78ch;text-wrap:pretty}
+.exam-disclaimer strong{display:block;margin-bottom:4px;color:#5a3d00;font-weight:600}
+
+.exam-grade-panel{display:flex;flex-wrap:wrap;gap:32px;justify-content:space-between;
+  background:var(--inverse-surface);border:1px solid rgba(240,240,238,0.12);border-radius:var(--r);
+  padding:30px 32px;margin-bottom:28px;color:var(--on-inverse)}
+.exam-grade-label{font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(240,240,238,0.42)}
+.exam-grade20{font-family:var(--font-display);font-weight:300;font-size:76px;line-height:1;
+  letter-spacing:-0.03em;margin:10px 0 4px;font-variant-numeric:tabular-nums}
+.exam-grade-scale{font-size:12px;color:rgba(240,240,238,0.55)}
+.exam-grade-side{text-align:right;display:flex;flex-direction:column;justify-content:flex-end}
+.exam-total200{font-family:var(--font-mono);font-size:26px;margin:10px 0 4px;font-variant-numeric:tabular-nums}
+.exam-grade-meta{font-size:12px;color:rgba(240,240,238,0.55)}
+
+.exam-mark{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:20px 22px;margin-bottom:12px}
+.exam-mark-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}
+.exam-mark-score{flex-shrink:0;font-family:var(--font-mono);font-size:13px;font-weight:500;
+  border-radius:var(--r-full);padding:4px 13px;white-space:nowrap;
+  background:var(--surface-1);border:1px solid var(--border);color:var(--ink)}
+.exam-mark-score.full{background:var(--success-bg);border-color:rgba(26,127,55,0.3);color:var(--success)}
+.exam-mark-score.zero{background:var(--error-bg);border-color:rgba(209,36,47,0.28);color:var(--error)}
+.exam-mark-how{font-size:10.5px;letter-spacing:0.09em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px}
+.exam-mark-yours{background:var(--bg);border-left:2px solid var(--surface-2);border-radius:0 var(--r) var(--r) 0;
+  padding:11px 14px;font-size:14px;line-height:1.6;color:var(--ink);white-space:pre-wrap;margin-bottom:12px}
+.exam-mark-yours.blank{color:var(--ink-3);font-style:italic}
+.exam-mark-comment{font-size:14px;line-height:1.6;color:var(--ink-2);text-wrap:pretty}
+.exam-rubric{margin-top:12px;font-size:13px}
+.exam-rubric summary{cursor:pointer;color:var(--ink-3);font-size:12px;letter-spacing:0.03em}
+.exam-rubric summary:hover{color:var(--ink)}
+.exam-rubric p{margin-top:9px;padding:11px 14px;background:var(--surface-1);border-radius:var(--r);
+  color:var(--ink-2);line-height:1.6;white-space:pre-wrap}
+
+/* ── Past sittings, on the deck screen ── */
+.exam-history-row{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
+  background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:14px 18px;margin-top:10px}
+.exam-history-main{min-width:0}
+.exam-history-title{font-size:14.5px;font-weight:500}
+.exam-history-when{font-size:12px;color:var(--ink-3);margin-top:3px}
+.exam-history-grade{font-family:var(--font-mono);font-size:15px;font-variant-numeric:tabular-nums}
+.exam-history-grade.pending{font-size:12px;color:var(--warning)}
+
+@media (max-width:720px){
+  .exam-bar{top:0;gap:12px;padding:12px 14px}
+  .exam-bar-id{flex-basis:100%}
+  .exam-bar-actions{width:100%;justify-content:space-between}
+  .exam-grade-side{text-align:left}
+  .exam-grade20{font-size:60px}
+  .exam-options,.exam-answer{margin-left:0}
+}
