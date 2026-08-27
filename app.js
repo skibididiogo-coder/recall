@@ -6550,6 +6550,8 @@ async function callClaudeGrade(exam, answers) {
    read off the PDF — goes through escapeHtml. The grader's comment is the one most
    easily forgotten because it arrives last and reads like a system message. It is not. */
 
+const EXAM_ANSWER_MIN_HEIGHT = 130;   // matches .exam-answer textarea in styles.css
+
 let currentExamId = '';
 let examClockMode = 'up';       // 'up' = elapsed (default) | 'down' = remaining
 let examClockHandle = null;
@@ -6845,10 +6847,29 @@ function examItemHtml(item, n, answer) {
 
 /* Answers autosave on a debounce. Closing the tab mid-exam must not cost the paper —
    the same localStorage fragility this project has been closing since #19. */
+/* An 18-point item is roughly 200 words. A fixed box hides most of that behind an inner
+   scrollbar, so you write into a window and cannot re-read your own argument — which is
+   exactly what you need to do on an extended-response answer. Diogo hit this sitting the
+   first real paper, 2026-08-27.
+
+   Height is set from scrollHeight, and reset to 'auto' first: without the reset the box
+   can only ever grow, so deleting a paragraph leaves the empty space behind. */
+function autoGrowExamAnswer(el) {
+  if (!el || el.tagName !== 'TEXTAREA') return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(el.scrollHeight, EXAM_ANSWER_MIN_HEIGHT) + 'px';
+}
+
 function wireExamInputs() {
   document.querySelectorAll('#exam-body [data-item]').forEach(el => {
-    const handler = () => onExamAnswer(el.getAttribute('data-item'), el.value);
+    const handler = () => {
+      autoGrowExamAnswer(el);
+      onExamAnswer(el.getAttribute('data-item'), el.value);
+    };
     if (el.type === 'radio') el.onchange = handler; else el.oninput = handler;
+    // Also on first paint, so an answer restored after F5 opens at its full height
+    // instead of making you scroll to find what you already wrote.
+    autoGrowExamAnswer(el);
   });
 }
 

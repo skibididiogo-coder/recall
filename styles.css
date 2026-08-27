@@ -937,7 +937,9 @@ li.tl-item:last-child{padding-bottom:0}
 .exam-answer textarea,.exam-answer input[type=text]{width:100%;padding:12px 14px;font-size:14.5px;line-height:1.6;
   background:var(--bg);border:1px solid var(--border);border-radius:var(--r);outline:none;
   transition:border-color 120ms,box-shadow 120ms,background 120ms}
-.exam-answer textarea{min-height:130px;resize:vertical}
+/* height is set inline by autoGrowExamAnswer; overflow:hidden stops a scrollbar
+   flickering in for the instant between a keystroke and the resize. */
+.exam-answer textarea{min-height:130px;resize:vertical;overflow:hidden}
 .exam-answer textarea:focus,.exam-answer input[type=text]:focus{background:#fff;border-color:var(--ink);
   box-shadow:0 0 0 3px rgba(10,10,10,0.06)}
 .exam-foot{display:flex;justify-content:flex-end;padding:8px 0 40px}
