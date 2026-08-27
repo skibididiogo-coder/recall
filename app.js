@@ -99,6 +99,18 @@ function normalizePomodoros(v) {
   return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
 }
 
+/* `exams` (feature #36) is a SIXTH top-level key. Anything unusable degrades to []
+   and NEVER to a `wrong-shape` refusal — a refusal here arms the #19 write lock
+   against a library that is otherwise perfectly good, which is far worse than
+   dropping a key nothing has written yet.
+
+   Defined HERE in 1B for the same reason normalizePomodoros is, one comment above:
+   test-backup.mjs and test-migration.mjs evaluate ONLY the 1B slice, so a helper
+   defined further down is not in scope for the functions below that call it. */
+function normalizeExams(v) {
+  return Array.isArray(v) ? v : [];
+}
+
 function normalizeAssignmentsForGcal(list) {
   return (Array.isArray(list) ? list : [])
     .map(a => (a ? { ...a, gcalEventId: normalizeGcalEventId(a.gcalEventId) } : a));
@@ -107,7 +119,7 @@ function normalizeAssignmentsForGcal(list) {
 function parseSavedData(raw) {
   // No key at all = a genuinely new install. Empty, but not a fault.
   if (raw === null || raw === undefined || raw === '') {
-    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [], gamification: null, pomodoros: {} } };
+    return { ok: true, empty: true, data: { decks: [], cards: [], log: {}, assignments: [], gamification: null, pomodoros: {}, exams: [] } };
   }
 
   let parsed;
@@ -138,6 +150,9 @@ function parseSavedData(raw) {
       assignments: normalizeAssignmentsForGcal(parsed.assignments),
       // Rebuild site 2 (feature #34).
       pomodoros: normalizePomodoros(parsed.pomodoros),
+      // Rebuild site 2 (feature #36). Same rule as assignments and pomodoros: a
+      // library saved before Exam Mode has no `exams` and must still read cleanly.
+      exams: normalizeExams(parsed.exams),
       // `gamification` (feature #32) is the newest field and follows the same rule as
       // assignments: anything unusable degrades to null and is rebuilt by
       // normalizeGamification in loadData. It must NEVER make an older save
@@ -243,7 +258,10 @@ function parseBackupFile(raw) {
       assignments: normalizeAssignmentsForGcal(incoming.assignments),
       // Rebuild site 5 (feature #34). A pre-#34 backup has no pomodoros and must still
       // import; a post-#34 one carries real counts that must survive the restore.
-      pomodoros: normalizePomodoros(incoming.pomodoros)
+      pomodoros: normalizePomodoros(incoming.pomodoros),
+      // Rebuild site 3 (feature #36). A pre-#36 backup has no exams and must still
+      // import; a post-#36 one carries real sittings that must survive the restore.
+      exams: normalizeExams(incoming.exams)
     }
   };
 }
@@ -521,7 +539,10 @@ function loadData() {
     dataReadFailReason = result.reason;
     console.error('Recall could not read your saved data (' + result.reason +
                   '). Nothing has been changed. Writing is blocked until this is resolved.');
-    return { decks: [], cards: [], log: {}, assignments: [], gamification: emptyGamification(), pomodoros: {} };
+    // Rebuild site 4 (feature #36). The #19 lock hands back an empty library so the
+    // UI can still render — it must be SHAPED like a real one, or every read of
+    // data.exams throws on undefined while the app is already in its failure state.
+    return { decks: [], cards: [], log: {}, assignments: [], gamification: emptyGamification(), pomodoros: {}, exams: [] };
   }
 
   dataReadFailed = false;
@@ -546,6 +567,11 @@ function loadData() {
         // Decks saved before it get SPEECH_DEFAULT_LANG, which became en-US on
         // 2026-07-26 when all decks went English. Same backfill idea as above.
         lang: normalizeLang(d.lang),
+        // examFormat (feature #36): the IAVE Informação-Prova structure, extracted
+        // once per deck. Deck fields backfill in ONE place, so this costs 2 sites
+        // (here + createDeck) against 5 for a top-level key. That is why it lives
+        // on the deck and data.exams does not.
+        examFormat: d.examFormat === undefined ? null : d.examFormat,
         artifacts
       };
     });
@@ -575,7 +601,12 @@ function loadData() {
     // so a key omitted HERE is lost on every reload even though parseSavedData carried
     // it correctly. That is the #27 assignments bug verbatim. Pinned by check E2.
     const pomodoros = normalizePomodoros(parsed.pomodoros);
-    return { decks, cards, log, assignments, gamification, pomodoros };
+    // Rebuild site 5 (feature #36) — THE TRAP. This return names its keys
+    // explicitly. `exams` built here but omitted from the object literal below is
+    // lost on EVERY reload even though parseSavedData carried it correctly one
+    // function earlier. That is the #27 assignments bug verbatim. Pinned by B8.
+    const exams = normalizeExams(parsed.exams);
+    return { decks, cards, log, assignments, gamification, pomodoros, exams };
   }
 }
 
@@ -799,7 +830,7 @@ function createDeck(name, tag, lang) {
   const data = loadData();
   const deck = {
     id: newId('deck'), name, tag: tag || '', createdAt: Date.now(),
-    summary: '', source: '', lang: normalizeLang(lang), artifacts: {}
+    summary: '', source: '', lang: normalizeLang(lang), artifacts: {}, examFormat: null
   };
   saveData({ ...data, decks: [...data.decks, deck] });
   return deck;
@@ -841,7 +872,11 @@ function deleteDeck(deckId) {
   saveData({
     ...data,
     decks: data.decks.filter(d => d.id !== deckId),
-    cards: data.cards.filter(c => c.deckId !== deckId)
+    cards: data.cards.filter(c => c.deckId !== deckId),
+    // Feature #36. `...data` above carries unknown keys straight through, so WITHOUT
+    // this filter the exams outlive their deck, keyed to a deckId nothing resolves.
+    // Nothing in the UI could list them and nothing could ever remove them.
+    exams: (data.exams || []).filter(e => e.deckId !== deckId)
   });
   // Drop the in-memory chat thread too (feature #29). Ids are unique, so this is
   // belt-and-braces rather than a live bug — but a deleted deck leaving its
@@ -1900,6 +1935,327 @@ function renderPomodoro() {
 }
 
 /* ----------------------------------------------------------------
+   1I. EXAM MODE — Exames Nacionais (feature #36), pure half.
+   ----------------------------------------------------------------
+   A mock national exam built from a deck's own material, in the structure of that
+   subject's official IAVE Informação-Prova, sat under a clock and marked out of 200.
+
+   Its own section rather than a corner of 1H: the block first landed between the
+   pomodoro's pure and impure halves, which made the file read POMODORO → EXAM →
+   POMODORO. Structure that confusing becomes a bug eventually.
+
+   THREE THINGS THE MODEL WILL GET WRONG, AND WHERE EACH IS CAUGHT:
+     1. A paper that does not total 200 points. JSON Schema cannot express "these
+        numbers sum to 200", so parseExamResponse sums and refuses. A 190-point paper
+        marks every answer 5% low, silently, forever.
+     2. A mark above what the item is worth. parseGradingResponse clamps to
+        [0, points]. An inflated mark looks exactly like a good one.
+     3. An item skipped or invented during marking. Skipped items are filled with 0
+        AND say "not marked"; invented ids are dropped.
+
+   The clock is deliberately NOT calculateTimerState — that name belongs to the
+   pomodoro (1H). A second declaration would not error: the later one simply WINS,
+   and the focus timer would break in silence on Study, Cram and Quiz.
+   ---------------------------------------------------------------- */
+
+/* ── PURE exam ───────────────────────────────────────────────────
+   THIS BLOCK MUST NOT REFERENCE ANYTHING OUTSIDE ITSELF. (C) test-exam-mode.mjs
+   lifts it out with new Function() and evaluates it standalone — naming an outside
+   identifier throws a ReferenceError that takes the whole slice down and fakes a
+   failure for every check in the suite.
+
+   normalizeExams is NOT here. It lives in 1B beside normalizePomodoros, because
+   parseSavedData and parseBackupFile call it and those are evaluated from the 1B
+   slice alone. Putting it here broke (C) test-backup.mjs and (C) test-migration.mjs
+   on 2026-08-26 — the comment above normalizePomodoros had already warned about it. */
+
+const EXAM_TOTAL_POINTS = 200;          // a national exam is always out of 200
+const EXAM_MIN_DURATION = 15;           // minutes; below this it is not an exam
+const EXAM_MAX_DURATION = 360;          // minutes; above this the PDF was misread
+const EXAM_KINDS = ['mc', 'short', 'long'];
+/* A title is a title. Measured 2026-08-26: given a mismatched deck, Claude wrote a
+   418-character AVISO IMPORTANTE into this field because the schema gave it nowhere
+   else to warn — and it landed in a sticky one-line bar. The channel below is the real
+   fix; this cap is the seatbelt for the next time a model improvises. */
+const EXAM_TITLE_MAX = 120;
+
+function examPad2(n) { return String(n).padStart(2, '0'); }
+
+/* mm:ss under an hour, hh:mm:ss over it. A national exam runs 90-150 minutes, so
+   "02:29:00" reads far better than the pomodoro's un-wrapped "149:00".
+   Anything negative or unparseable clamps to 00:00 — a late tick must never paint
+   a negative clock. */
+function formatExamClock(ms) {
+  const raw = Number(ms);
+  const secs = Number.isFinite(raw) && raw > 0 ? Math.floor(raw / 1000) : 0;
+  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), sec = secs % 60;
+  return h > 0
+    ? examPad2(h) + ':' + examPad2(m) + ':' + examPad2(sec)
+    : examPad2(m) + ':' + examPad2(sec);
+}
+
+/* Elapsed comes from timestamps, never from counting ticks — a throttled background
+   tab would drift and silently turn a 150-minute exam into 200.
+
+   `pausedAt` freezes the clock exactly as the pomodoro's does: elapsed is measured to
+   the pause, not to now, so stepping away from a paused exam does not burn it (I6).
+   A backwards clock jump (NTP) clamps to 0 rather than going negative (I7).
+
+   Running out of time sets `exceeded` and nothing else. It does NOT submit: taking
+   the paper away mid-sentence would destroy an answer to enforce a rule this app has
+   no business enforcing. Past zero the countdown counts UP as "+01:00", because how
+   far over you went is information and a frozen 00:00 is not. */
+function calculateExamTimerState(startedAt, now, durationMin, mode, pausedAt) {
+  const limitMs = Math.max(0, (Number(durationMin) || 0) * 60000);
+  if (!startedAt) {
+    return { label: mode === 'down' ? formatExamClock(limitMs) : '00:00',
+             elapsedMs: 0, remainingMs: limitMs, exceeded: false };
+  }
+  const end = pausedAt ? Number(pausedAt) : Number(now);
+  let elapsedMs = end - Number(startedAt);
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) elapsedMs = 0;
+
+  const remainingMs = limitMs - elapsedMs;
+  const exceeded = limitMs > 0 && elapsedMs >= limitMs;
+  const label = mode === 'down'
+    ? (exceeded ? '+' + formatExamClock(-remainingMs) : formatExamClock(remainingMs))
+    : formatExamClock(elapsedMs);
+  return { label, elapsedMs, remainingMs, exceeded };
+}
+
+/* The model's own refusal channel. `isExamInfo: false` is NOT an error — retrying
+   cannot change what the PDF contains — so this returns a refusal the UI renders in
+   quiet ink with no Try again button. The refusal always carries a sentence: an empty
+   one is a dead end, and #22 exists because this app was full of them. */
+function parseExamFormatResponse(parsed) {
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, refusal: 'Claude sent back something unreadable.' };
+  }
+  if (parsed.isExamInfo === false) {
+    return { ok: false, refusal: String(parsed.reason || '').trim() ||
+      'That PDF does not look like an Informação-Prova.' };
+  }
+  const groups = Array.isArray(parsed.groups) ? parsed.groups : [];
+  // An empty array is a BROKEN MODEL RESPONSE, not a property of the document. The
+  // model is asked to propose a split whenever the document is silent, so it should
+  // never come back with none.
+  if (groups.length === 0) {
+    return { ok: false, refusal: 'Claude returned no Grupos at all. Try reading the PDF again.' };
+  }
+  const dur = Number(parsed.durationMin);
+  if (!Number.isFinite(dur) || dur < EXAM_MIN_DURATION || dur > EXAM_MAX_DURATION) {
+    return { ok: false, refusal: 'Could not read a sensible exam duration from that PDF.' };
+  }
+  return {
+    ok: true,
+    format: {
+      subject: String(parsed.subject || '').trim() || 'Exame',
+      code: String(parsed.code || ''),
+      year: String(parsed.year || ''),
+      durationMin: Math.round(dur),
+      // Not taken from the PDF. A national exam is 200 points; a model that read 137
+      // off a table misread the table, and trusting it would rescale every mark.
+      totalPoints: EXAM_TOTAL_POINTS,
+      /* Did the Grupo split come from the DOCUMENT, or from Claude?
+
+         MEASURED 2026-08-26 on the real 2026 documents: neither História A (623) nor
+         Física e Química A (715) names Grupos or per-group cotações. They give the
+         total, the duration, the item types and the themes — and stop there. The
+         original design assumed otherwise, and refusing on that assumption would have
+         refused every official document in existence.
+
+         So the split is now allowed to come from Claude — and this flag is the whole
+         price of that. It defaults to FALSE on anything unclear, because claiming a
+         split is official when it is not is the exact failure the mandatory-PDF
+         decision existed to prevent. The setup screen reads this and says so. */
+      groupsFromDocument: parsed.groupsFromDocument === true,
+      groups: groups.map(g => ({
+        id: String(g.id || ''),
+        title: String(g.title || ''),
+        itemCount: Math.max(1, Number(g.itemCount) || 1),
+        // Anything this app cannot render is dropped rather than carried forward to
+        // become an item kind the exam screen has no input for.
+        kinds: Array.isArray(g.kinds) ? g.kinds.filter(k => EXAM_KINDS.indexOf(k) !== -1) : [],
+        points: Math.max(0, Number(g.points) || 0)
+      }))
+    }
+  };
+}
+
+function examPointsTotal(groups) {
+  return (Array.isArray(groups) ? groups : []).reduce((sum, g) =>
+    sum + (Array.isArray(g.items) ? g.items : [])
+      .reduce((s, it) => s + (Number(it.points) || 0), 0), 0);
+}
+
+/* THE 200-POINT GUARD. JSON Schema cannot express "the points of every item sum to
+   200" — there is no keyword for it. The model gets it right most of the time and
+   wrong some of the time, and a 190-point paper marks every answer 5% low with
+   nothing anywhere to notice. So we sum here, and refuse rather than rescale: a
+   silent rescale would hide that it happened. */
+function parseExamResponse(parsed) {
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, refusal: 'Claude sent back something unreadable.' };
+  }
+  const groups = Array.isArray(parsed.groups) ? parsed.groups : [];
+  if (groups.length === 0) {
+    return { ok: false, refusal: 'Claude returned an exam with no Grupos. Generating again usually fixes it.' };
+  }
+
+  const seen = {};
+  const clean = [];
+  for (let gi = 0; gi < groups.length; gi++) {
+    const g = groups[gi];
+    const items = Array.isArray(g.items) ? g.items : [];
+    const outItems = [];
+    for (let ii = 0; ii < items.length; ii++) {
+      const it = items[ii];
+      const id = String(it.id || '');
+      // Duplicate ids collide in `answers`, so two questions would share one answer
+      // and one of them would be marked against text written for the other.
+      if (!id || seen[id]) {
+        return { ok: false, refusal: 'Claude reused a question number, so the paper is unusable. Generating again usually fixes it.' };
+      }
+      seen[id] = true;
+
+      const kind = EXAM_KINDS.indexOf(it.kind) !== -1 ? it.kind : 'short';
+      // options/correct are meaningful ONLY for mc. The schema has to require them on
+      // every item (JSON Schema cannot make a field conditional on a sibling's value),
+      // so they arrive as noise on open items and are cleared here.
+      const options = (kind === 'mc' && Array.isArray(it.options)) ? it.options.map(String) : [];
+      const correct = kind === 'mc' ? Number(it.correct) : -1;
+      if (kind === 'mc' && (!Number.isInteger(correct) || correct < 0 || correct >= options.length)) {
+        return { ok: false, refusal: 'A multiple-choice question came back with no valid answer. Generating again usually fixes it.' };
+      }
+
+      outItems.push({
+        id: id, kind: kind, prompt: String(it.prompt || ''),
+        options: options, correct: correct,
+        points: Math.max(0, Number(it.points) || 0),
+        rubric: String(it.rubric || '')
+      });
+    }
+    if (outItems.length) {
+      clean.push({ id: String(g.id || ''), title: String(g.title || ''), items: outItems });
+    }
+  }
+
+  const total = examPointsTotal(clean);
+  if (total !== EXAM_TOTAL_POINTS) {
+    return { ok: false, refusal: 'Claude built a ' + total + '-point paper instead of ' +
+      EXAM_TOTAL_POINTS + '. Generating again usually fixes it.' };
+  }
+  const title = String(parsed.title || 'Exame').trim() || 'Exame';
+  return {
+    ok: true,
+    exam: {
+      title: title.length > EXAM_TITLE_MAX ? title.slice(0, EXAM_TITLE_MAX - 1) + '…' : title,
+      /* The model's channel to say "I built this, but the deck does not support it".
+         Empty means the material was fine — never undefined, because the banner shows
+         whenever this is non-empty and undefined would flag every exam ever built. */
+      materialWarning: String(parsed.materialWarning || '').trim(),
+      groups: clean
+    }
+  };
+}
+
+/* Multiple choice is marked here, on the client, instantly and for free. Sending it
+   to the model would cost tokens and invite it to disagree with arithmetic. */
+function gradeMultipleChoice(exam, answers) {
+  const out = {};
+  const given = (answers && typeof answers === 'object') ? answers : {};
+  const groups = (exam && Array.isArray(exam.groups)) ? exam.groups : [];
+  groups.forEach(function (g) {
+    (g.items || []).forEach(function (it) {
+      if (it.kind !== 'mc') return;
+      const picked = given[it.id];
+      const answered = picked !== undefined && picked !== null && String(picked).trim() !== '';
+      const right = answered && Number(picked) === it.correct;
+      out[it.id] = {
+        points: right ? it.points : 0,
+        max: it.points,
+        comment: right ? 'Correct.' : 'Correct answer: ' + (it.options[it.correct] || '—')
+      };
+    });
+  });
+  return out;
+}
+
+/* Given a 15-point item and a good answer, Sonnet will sometimes return 18. It will
+   also sometimes skip an item, and sometimes invent an id. All three are real, and
+   all three are SILENT — an inflated mark looks exactly like an earned one.
+
+   A skipped item is filled with 0 and says so. That distinction matters: a genuine
+   zero is feedback, an unmarked item is a bug, and they must not look the same. */
+function parseGradingResponse(parsed, exam) {
+  const byId = {};
+  const groups = (exam && Array.isArray(exam.groups)) ? exam.groups : [];
+  groups.forEach(function (g) {
+    (g.items || []).forEach(function (it) { if (it.kind !== 'mc') byId[it.id] = it; });
+  });
+
+  const out = {};
+  const rows = (parsed && Array.isArray(parsed.items)) ? parsed.items : [];
+  rows.forEach(function (row) {
+    const it = byId[String(row && row.id)];
+    if (!it) return;                                   // hallucinated id — drop it
+    const raw = Number(row.points);
+    const points = Number.isFinite(raw) ? Math.min(it.points, Math.max(0, raw)) : 0;
+    out[it.id] = { points: points, max: it.points, comment: String(row.comment || '') };
+  });
+
+  Object.keys(byId).forEach(function (id) {
+    if (!out[id]) {
+      out[id] = { points: 0, max: byId[id].points, comment: 'Not marked — try grading again.' };
+    }
+  });
+  return out;
+}
+
+/* 200 points → the Portuguese 0-20 scale, to one decimal. Both halves are stored on
+   the record: keeping total200 means a future change to the rounding rule can
+   recompute old papers instead of stranding them.
+
+   Clamped to the paper's own total, so a grader that somehow over-awards across
+   several items cannot produce a 21. */
+function examScore(perItem, exam) {
+  const cap = examPointsTotal(exam && exam.groups) || EXAM_TOTAL_POINTS;
+  const map = (perItem && typeof perItem === 'object') ? perItem : {};
+  let sum = 0;
+  Object.keys(map).forEach(function (id) {
+    const p = Number(map[id] && map[id].points);
+    if (Number.isFinite(p)) sum += p;
+  });
+  const total200 = Math.min(cap, Math.max(0, sum));
+  return { total200: total200, grade20: Math.round((total200 / 10) * 10) / 10 };
+}
+
+/* Whitespace is not an answer. Counting "   " as answered would tell a student they
+   had finished a paper they had not started. */
+function examProgress(exam, answers) {
+  const given = (answers && typeof answers === 'object') ? answers : {};
+  const groups = (exam && Array.isArray(exam.groups)) ? exam.groups : [];
+  let answered = 0, total = 0;
+  groups.forEach(function (g) {
+    (g.items || []).forEach(function (it) {
+      total++;
+      const v = given[it.id];
+      if (v !== undefined && v !== null && String(v).trim() !== '') answered++;
+    });
+  });
+  return { answered: answered, total: total };
+}
+
+/* Copy before sorting: Array.prototype.sort mutates, and this runs on the library
+   array straight out of loadData(). */
+function sortExamsNewestFirst(list) {
+  return (Array.isArray(list) ? list.slice() : [])
+    .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+}
+
+/* ── END PURE exam */
+
+/* ----------------------------------------------------------------
    2. SM-2 SCHEDULER
    ----------------------------------------------------------------
    The classic spaced-repetition idea: after you see a card you rate
@@ -2503,6 +2859,7 @@ function goDeck(deckId) {
 
   fillLangSelect(document.getElementById('deck-lang'), deck.lang);
   refreshSpeechUi();
+  renderExamHistory(deckId);   // feature #36
 
   renderCards();
   showScreen('deck');
@@ -3133,7 +3490,47 @@ const API_MESSAGES = {
   529: 'Claude is overloaded right now. This is temporary — try again in a moment.'
 };
 
-function describeApiError(status, detail) {
+/* ── Feature #36. Exam Mode adds three network call sites and ZERO new error
+   handlers. #22 exists because the same 401/429/!ok block was copy-pasted at seven
+   sites, so 529 — the failure actually hit in the real world — was handled at none of
+   them. A fourth handler would undo that, and the next missing status would go
+   missing somewhere new that nobody thinks to look.
+
+   Two TABLES, one function. Resolution:
+       EXAM_SERVICE[service][code]  →  EXAM_MESSAGES[code]  →  API_MESSAGES[code]
+
+   Neither table can touch `retryable`. That stays derived from the status code by the
+   single rule below, because a table that could also flip retryability would be a
+   second mapper wearing the first one's clothes — and the thing that goes wrong is a
+   Try again button appearing on a rejected API key, which is a lie. */
+
+/* Exam-wide: codes the rest of the app essentially never sees. 413 only ever happens
+   here, because nothing else in Recall posts a whole PDF or a whole 200-point paper. */
+const EXAM_MESSAGES = {
+  400: 'Claude could not use what it was sent. The material or the PDF may be unreadable.',
+  413: 'That file is too large for Claude to read in one go. Try just the pages with the exam structure.'
+};
+
+/* Per-call refinements, only where the three genuinely differ. The difference that
+   matters is what the user is afraid of at that exact moment: mid-generation nothing
+   exists yet, but mid-marking they have just spent two hours writing, and the honest
+   thing to tell them is that it is already on disk. */
+const EXAM_SERVICE = {
+  format: {
+    400: 'Claude could not read that PDF. Is it the official Informação-Prova for your subject?'
+  },
+  exam: {
+    400: 'Claude could not build an exam from this deck. The material may be too thin.',
+    429: 'Rate limited while building your exam. Nothing was lost — wait a moment and try again.'
+  },
+  grade: {
+    429: 'Rate limited while marking. Your answers are saved — try again in a moment.',
+    529: 'Claude is overloaded. Your answers are saved — try again in a moment.',
+    500: 'Claude had a server error while marking. Your answers are saved — try again in a moment.'
+  }
+};
+
+function describeApiError(status, detail, service) {
   // Pre-flight: navigator.onLine already told us there is no connection, so we
   // can say so precisely instead of guessing from a failed fetch. Retryable by
   // definition — reconnecting IS the fix.
@@ -3143,7 +3540,12 @@ function describeApiError(status, detail) {
 
   const code = Number(status) || 0;   // undefined / null / 0 all mean "never got a response"
 
-  let message = API_MESSAGES[code];
+  let message;
+  if (service) {
+    const svc = EXAM_SERVICE[service];
+    message = (svc && svc[code]) || EXAM_MESSAGES[code];
+  }
+  if (!message) message = API_MESSAGES[code];
   if (!message) {
     // Unknown code: 5xx is treated as transient, 4xx as our problem to fix.
     message = code >= 500
@@ -3222,10 +3624,10 @@ function refusalHelp(kind) {
 /* ── 8B-impure ───────────────────────────────────────────────────
    Turns a fetch Response into a thrown Error carrying `.retryable`, so
    every call site fails the same way and the UI can decide what to offer. */
-async function apiError(res) {
+async function apiError(res, service) {
   let detail = '';
   try { const b = await res.json(); detail = b.error?.message || ''; } catch (e) {}
-  const { message, retryable } = describeApiError(res.status, detail);
+  const { message, retryable } = describeApiError(res.status, detail, service);
   const err = new Error(message);
   err.retryable = retryable;
   err.status = res.status;
@@ -5827,6 +6229,905 @@ async function onGenerateChart() {
     chartBusy = false;
     document.getElementById('chart-gen-btn').disabled = false;
   }
+}
+
+/* ----------------------------------------------------------------
+   9H. EXAM MODE (Claude API, structured output) — feature #36
+   ----------------------------------------------------------------
+   Three calls, but only TWO per exam:
+
+     callClaudeExamFormat(pdfText)     once per deck — reads the IAVE Informação-Prova
+     callClaudeExam(material, format)  per exam      — builds the paper
+     callClaudeGrade(exam, answers)    per submission — marks the open answers
+
+   Extracting the structure separately is what makes the mandatory PDF bearable: it is
+   uploaded once per deck, not once per exam. It is also the only place a wrong PDF can
+   be turned away, because that decision needs the document and nothing else.
+
+   Every one of the three re-validates on the client. The schema constrains SHAPE; it
+   cannot constrain "these numbers sum to 200", "these ids are unique", or "this mark is
+   not above what the item is worth". Those live in 1I and are not optional.
+   ---------------------------------------------------------------- */
+
+const FORMAT_SCHEMA = {
+  type: 'object',
+  properties: {
+    // The refusal channel. A holiday photo and a maths worksheet must both be turned
+    // away, and only the model can see which it is looking at.
+    isExamInfo:  { type: 'boolean' },
+    reason:      { type: 'string' },
+    // true only when the document ITSELF lays out the Grupos and their cotações.
+    groupsFromDocument: { type: 'boolean' },
+    subject:     { type: 'string' },
+    code:        { type: 'string' },
+    year:        { type: 'string' },
+    durationMin: { type: 'integer' },
+    totalPoints: { type: 'integer' },
+    groups: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id:        { type: 'string' },
+          title:     { type: 'string' },
+          itemCount: { type: 'integer' },
+          kinds:     { type: 'array', items: { type: 'string', enum: ['mc', 'short', 'long'] } },
+          points:    { type: 'integer' }
+        },
+        required: ['id', 'title', 'itemCount', 'kinds', 'points'],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ['isExamInfo', 'reason', 'groupsFromDocument', 'subject', 'code', 'year',
+             'durationMin', 'totalPoints', 'groups'],
+  additionalProperties: false
+};
+
+const EXAM_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    // Empty when the deck genuinely supports this exam. One or two sentences when it
+    // does not — this is where "your deck has no History in it" belongs, and the only
+    // reason it is not written into the title instead.
+    materialWarning: { type: 'string' },
+    groups: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id:    { type: 'string' },
+          title: { type: 'string' },
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id:      { type: 'string' },
+                kind:    { type: 'string', enum: ['mc', 'short', 'long'] },
+                prompt:  { type: 'string' },
+                // options and correct are meaningful only when kind is 'mc'. JSON Schema
+                // cannot make a field conditional on a sibling's value, so both are
+                // required on every item and cleared for open items in parseExamResponse.
+                options: { type: 'array', items: { type: 'string' } },
+                correct: { type: 'integer' },
+                points:  { type: 'integer' },
+                rubric:  { type: 'string' }
+              },
+              required: ['id', 'kind', 'prompt', 'options', 'correct', 'points', 'rubric'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['id', 'title', 'items'],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ['title', 'materialWarning', 'groups'],
+  additionalProperties: false
+};
+
+const GRADING_SCHEMA = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id:      { type: 'string' },
+          points:  { type: 'number' },
+          comment: { type: 'string' }
+        },
+        required: ['id', 'points', 'comment'],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ['items'],
+  additionalProperties: false
+};
+
+/* Read the official Informação-Prova. Once per deck — the result is cached on
+   deck.examFormat, so the PDF is never asked for again. */
+async function callClaudeExamFormat(pdfText) {
+  if (!navigator.onLine) throw offlineError();
+
+  const systemPrompt =
+    `You read a Portuguese IAVE "Informação-Prova" and extract the exam's STRUCTURE.\n` +
+    `STRICT RULES:\n` +
+    `1. If this is NOT an Informação-Prova (or an equivalent official exam-structure ` +
+    `document), set "isExamInfo": false and put ONE plain sentence in "reason" saying ` +
+    `what it looks like instead. Extract nothing else.\n` +
+    `2. Extract only what the document states. NEVER fill a gap from memory of other exams.\n` +
+    `3. If the document DOES lay out Grupos with their cotações, copy them exactly and ` +
+    `set "groupsFromDocument": true.\n` +
+    `4. If it does NOT — the 2026 documents typically do not — set "groupsFromDocument": ` +
+    `false and PROPOSE a sensible split instead, using only what the document does say: ` +
+    `the total of 200 points, the item types it names, and the duration. Two or three ` +
+    `Grupos, cotações totalling exactly 200. Never present a proposal as if it were quoted.\n` +
+    `5. "durationMin": the official duration in minutes.\n` +
+    `6. Unknown "code" or "year" → empty string. Never guess them.`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': getApiKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        max_tokens: 2048,
+        output_config: { format: { type: 'json_schema', schema: FORMAT_SCHEMA } },
+        system: systemPrompt,
+        messages: [{ role: 'user', content: 'Informação-Prova:\n\n' + pdfText }]
+      })
+    });
+  } catch (e) {
+    throw networkError();
+  }
+
+  if (!res.ok) throw await apiError(res, 'format');
+
+  const data = await res.json();
+  // A model-level refusal is not an error either: quiet ink, no Try again.
+  if (data.stop_reason === 'refusal') {
+    return { ok: false, refusal: 'Claude declined to read that document.' };
+  }
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw transientError('Claude sent back an empty answer. This usually works on a second attempt.');
+
+  let parsed;
+  try { parsed = JSON.parse(textBlock.text); }
+  catch (e) { throw transientError('Claude sent back something unreadable. This usually works on a second attempt.'); }
+  return parseExamFormatResponse(parsed);
+}
+
+/* Build the paper. The structure and the material are handed over separately and
+   labelled, so "follow this shape" and "use only this content" cannot blur together. */
+async function callClaudeExam(material, format) {
+  if (!navigator.onLine) throw offlineError();
+
+  const systemPrompt =
+    `You write a mock Portuguese national exam from a student's own study material.\n` +
+    `STRICT RULES:\n` +
+    `1. Use ONLY the material — no outside knowledge, even if you know more.\n` +
+    `2. Write in the SAME language as the material.\n` +
+    `3. Follow the supplied STRUCTURE exactly: these Grupos, these item counts, these ` +
+    `cotações, this mix of item kinds. Do not add or drop a Grupo.\n` +
+    `4. The "points" of every item must total EXACTLY 200 across the whole paper.\n` +
+    `5. Every item needs a "rubric". For "mc" it names the correct option. For "short" ` +
+    `and "long" it is IAVE-style descriptive performance levels, e.g. "2 pontos: ` +
+    `identifica o conceito. 4 pontos: identifica e justifica com um exemplo do texto."\n` +
+    `6. "mc" items: 4 options, "correct" is the 0-based index. Non-mc items: ` +
+    `"options": [], "correct": -1.\n` +
+    `7. Thin material → say so. Never pad, and never invent content the material lacks.\n` +
+    `8. "title": a SHORT exam title, under 100 characters. NEVER put a warning in it.\n` +
+    `9. "materialWarning": empty string when the material genuinely supports this exam. ` +
+    `If it does not — wrong subject, too thin, off-topic — put ONE or TWO sentences here ` +
+    `saying what is missing. This is the ONLY place a warning belongs.`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': getApiKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        // The highest ceiling in the app by a wide margin. A 200-point paper carries a
+        // rubric on every item; truncation arrives as unparseable JSON and reads to the
+        // user as a transient error, which is the most misleading failure available.
+        max_tokens: 16384,
+        output_config: { format: { type: 'json_schema', schema: EXAM_SCHEMA } },
+        system: systemPrompt,
+        messages: [{ role: 'user', content:
+          'STRUCTURE (from the official Informação-Prova):\n' + JSON.stringify(format, null, 2) +
+          '\n\n---\n\nMATERIAL:\n\n' + material }]
+      })
+    });
+  } catch (e) {
+    throw networkError();
+  }
+
+  if (!res.ok) throw await apiError(res, 'exam');
+
+  const data = await res.json();
+  if (data.stop_reason === 'refusal') {
+    return { ok: false, refusal: 'Claude declined to build an exam from this material.' };
+  }
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw transientError('Claude sent back an empty answer. This usually works on a second attempt.');
+
+  let parsed;
+  try { parsed = JSON.parse(textBlock.text); }
+  catch (e) { throw transientError('Claude sent back something unreadable. This usually works on a second attempt.'); }
+  return parseExamResponse(parsed);
+}
+
+/* Mark the open answers. Multiple choice never leaves the browser — it is already
+   marked, and sending it would spend tokens inviting the model to disagree with
+   arithmetic it cannot improve on. */
+async function callClaudeGrade(exam, answers) {
+  if (!navigator.onLine) throw offlineError();
+
+  const given = (answers && typeof answers === 'object') ? answers : {};
+  const open = [];
+  ((exam && exam.groups) || []).forEach(function (g) {
+    (g.items || []).forEach(function (it) {
+      if (it.kind === 'mc') return;
+      open.push({ id: it.id, prompt: it.prompt, rubric: it.rubric,
+                  maxPoints: it.points, answer: String(given[it.id] || '') });
+    });
+  });
+  // Nothing to mark is not a failure: a paper of pure multiple choice is fully graded
+  // by gradeMultipleChoice, and a needless round trip would only add a way to fail.
+  if (open.length === 0) return {};
+
+  const systemPrompt =
+    `You mark open answers on a Portuguese national exam, as an IAVE examiner would.\n` +
+    `STRICT RULES:\n` +
+    `1. Mark ONLY against the item's "rubric". Do not invent criteria it does not name.\n` +
+    `2. Award partial credit at the rubric's own performance levels — a named level, ` +
+    `not a feeling.\n` +
+    `3. "points" must be between 0 and that item's "maxPoints", inclusive.\n` +
+    `4. A blank answer is 0.\n` +
+    `5. "comment": one or two sentences, in the language of the answer, saying what ` +
+    `earned the mark and what would have earned more. Address the student directly.\n` +
+    `6. Return one entry for EVERY item you were given. Never skip one.`;
+
+  let res;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': getApiKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-5',
+        max_tokens: 8192,
+        output_config: { format: { type: 'json_schema', schema: GRADING_SCHEMA } },
+        system: systemPrompt,
+        messages: [{ role: 'user', content: JSON.stringify({ items: open }, null, 2) }]
+      })
+    });
+  } catch (e) {
+    throw networkError();
+  }
+
+  if (!res.ok) throw await apiError(res, 'grade');
+
+  const data = await res.json();
+  if (data.stop_reason === 'refusal') {
+    throw transientError('Claude declined to mark this paper. Your answers are saved — try again.');
+  }
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw transientError('Claude sent back an empty answer. Your answers are saved — try again.');
+
+  let parsed;
+  try { parsed = JSON.parse(textBlock.text); }
+  catch (e) { throw transientError('Claude sent back something unreadable. Your answers are saved — try again.'); }
+  return parseGradingResponse(parsed, exam);
+}
+
+/* ── 9H-screen. The Exam Mode screens (feature #36) ───────────────
+   Three screens: setup (the mandatory PDF), the paper itself, and the marking.
+
+   Everything an LLM wrote — prompts, options, rubrics, grader comments, the subject
+   read off the PDF — goes through escapeHtml. The grader's comment is the one most
+   easily forgotten because it arrives last and reads like a system message. It is not. */
+
+const EXAM_ANSWER_MIN_HEIGHT = 130;   // matches .exam-answer textarea in styles.css
+
+let currentExamId = '';
+let examClockMode = 'up';       // 'up' = elapsed (default) | 'down' = remaining
+let examClockHandle = null;
+let examSaveHandle = null;
+/* Write-behind buffer. Every pending change accumulates HERE and is merged into a
+   freshly-read record when the debounce fires.
+
+   The bug this replaced (found in a screenshot on 2026-08-26, with 38 checks green):
+   each answer used to read the exam from storage, add itself, and schedule a save.
+   Two answers in quick succession meant the second read the record BEFORE the first
+   had written, then cancelled the first's save — so the first answer was silently
+   dropped. In a real sitting that is lost marks, and nothing would ever report it. */
+let examPending = null;
+let examPdfText = '';
+let examBusy = false;
+
+/* What the exam is generated FROM. Prefers the raw imported text, because a paper built
+   from the material itself beats one built from flashcards someone already summarised.
+   Falls back to the summary plus the cards, which is all a hand-built deck has. */
+function examMaterial(deck, cards) {
+  if (!deck) return '';
+  const source = typeof deck.source === 'string' ? deck.source.trim() : '';
+  if (source) return capSource(source).text;
+
+  const summary = typeof deck.summary === 'string' ? deck.summary.trim() : '';
+  const list = Array.isArray(cards) ? cards.filter(c => c && c.front && c.back) : [];
+  const parts = [];
+  if (summary) parts.push('Summary:\n' + summary);
+  if (list.length > 0) {
+    parts.push('Flashcards:\n' + list.map(c => 'Q: ' + c.front + '\nA: ' + c.back).join('\n\n'));
+  }
+  return capSource(parts.join('\n\n')).text;
+}
+
+function getExam(id) { return (loadData().exams || []).find(e => e.id === id) || null; }
+
+function saveExam(next) {
+  const data = loadData();
+  saveData({ ...data, exams: (data.exams || []).map(e => e.id === next.id ? next : e) });
+}
+
+/* ── Setup ── */
+
+function goExamForDeck() {
+  const deck = getDeck(currentDeckId);
+  if (!deck) { goDecks(); return; }
+  examPdfText = '';
+  document.getElementById('exam-pdf').value = '';
+  document.getElementById('exam-setup-tag').textContent = deck.tag || 'Exam Mode';
+  setExamFormatStatus('');
+  setExamGenerateStatus('');
+  setCrumb(deck.name + ' — Exam');
+  setActiveTab(null);
+  showScreen('exam-setup');
+  renderExamFormat();
+}
+
+function setExamFormatStatus(msg, kind, retry) { setArtStatus('exam-format-status', msg, kind, retry); }
+function setExamGenerateStatus(msg, kind, retry) { setArtStatus('exam-generate-status', msg, kind, retry); }
+
+/* Reuses the existing PDF reader wholesale — pdfjsLib, parsePageRange, capSource,
+   pdfErrorMessage. A second page-range parser would be a maintenance bug waiting. */
+async function onExamPdfChosen(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+
+  if (typeof pdfjsLib === 'undefined') {
+    setExamFormatStatus('PDF reader didn’t load — check your connection and refresh.', 'error');
+    return;
+  }
+  setExamFormatStatus('Reading PDF…', 'busy');
+  let text = '';
+  try {
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pages = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      pages.push(content.items.map(it => it.str).join(' '));
+    }
+    text = capSource(pages.join('\n\n')).text;
+  } catch (err) {
+    setExamFormatStatus(pdfErrorMessage(err), 'error');
+    return;
+  }
+  examPdfText = text;
+  await extractExamFormat();
+}
+
+async function extractExamFormat() {
+  if (!examPdfText) return;
+  setExamFormatStatus('Reading the exam structure…', 'busy');
+  let res;
+  try {
+    res = await callClaudeExamFormat(examPdfText);
+  } catch (err) {
+    // Try again only when retrying could actually help — never on a rejected key.
+    setExamFormatStatus(err.message, 'error', err.retryable ? extractExamFormat : undefined);
+    return;
+  }
+  if (!res.ok) {
+    // A refusal is not an error: quiet ink, no Try again, because retrying cannot
+    // change what the PDF contains. It names what the document lacks and where to
+    // find the right one.
+    const el = document.getElementById('exam-format-status');
+    el.className = 'gen-status note';
+    el.innerHTML = `<div class="refusal-why">${escapeHtml(res.refusal)}</div>` +
+      `<div class="refusal-needs">Exam Mode needs the official Informação-Prova for your ` +
+      `subject — it is the only thing that knows the real Grupos and cotações. ` +
+      `Download it from iave.pt and try that file.</div>`;
+    return;
+  }
+  const deck = getDeck(currentDeckId);
+  if (!deck) return;
+  saveData({ ...loadData(), decks: loadData().decks.map(d =>
+    d.id === currentDeckId ? { ...d, examFormat: { ...res.format, sourceName: 'Informação-Prova',
+                                                   extractedAt: Date.now() } } : d) });
+  setExamFormatStatus('Structure read — check it below, then generate.');
+  renderExamFormat();
+}
+
+/* Show the extracted structure back before generating anything. The PDF is the one
+   input a student cannot sanity-check by reading the output. */
+function renderExamFormat() {
+  const deck = getDeck(currentDeckId);
+  const wrap = document.getElementById('exam-format-summary');
+  const row = document.getElementById('exam-generate-row');
+  const fmt = deck && deck.examFormat;
+  if (!fmt) { wrap.innerHTML = ''; row.style.display = 'none'; return; }
+
+  const meta = [fmt.code && ('Prova ' + fmt.code), fmt.year, fmt.durationMin + ' min']
+    .filter(Boolean).join(' · ');
+  /* Said plainly, above the structure, not in a footnote. A student looking at a table
+     of Grupos will assume the IAVE wrote it unless told otherwise — and for every real
+     2026 document, the IAVE did not. */
+  const provenance = fmt.groupsFromDocument
+    ? `<div class="exam-format-source official">Grupos and cotações read from the document.</div>`
+    : `<div class="exam-format-source proposed"><strong>Recall chose this split.</strong> ` +
+      `The official Informação-Prova gives the duration, the 200 points, the item types ` +
+      `and the themes — but does not say how the exam divides into Grupos. Everything ` +
+      `above except the split comes from the document.</div>`;
+  wrap.innerHTML = `
+    <div class="exam-format-card">
+      <div class="exam-format-head">
+        <span class="exam-format-subject">${escapeHtml(fmt.subject)}</span>
+        <span class="exam-format-meta">${escapeHtml(meta)}</span>
+      </div>
+      ${provenance}
+      <div class="exam-format-groups">
+        ${fmt.groups.map(g => `
+          <div class="exam-format-row">
+            <span>${escapeHtml(g.title || g.id)}
+              <span class="kinds">${escapeHtml(g.itemCount + ' items · ' + (g.kinds.join(', ') || '—'))}</span>
+            </span>
+            <span class="pts">${escapeHtml(String(g.points))} pts</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  row.style.display = 'flex';
+}
+
+async function onGenerateExam() {
+  if (examBusy) return;
+  const deck = getDeck(currentDeckId);
+  if (!deck || !deck.examFormat) return;
+
+  // Same material the other AI features read, in the same order of preference: the
+  // imported source text if there is one, otherwise the summary plus the cards. Written
+  // as its own function rather than reusing buildTableContext so a change to the table's
+  // context rules cannot silently change what an exam is built from.
+  const material = examMaterial(deck, loadData().cards.filter(c => c.deckId === deck.id));
+  if (!material.trim()) {
+    setExamGenerateStatus(
+      'This deck has no material yet. Import some text or a PDF into it first — an exam is ' +
+      'built from what the deck contains, not from the subject name.', 'error');
+    return;
+  }
+
+  examBusy = true;
+  document.getElementById('exam-generate-btn').disabled = true;
+  setExamGenerateStatus('Building your exam… this one takes a while.', 'busy');
+
+  let res;
+  try {
+    res = await callClaudeExam(material, deck.examFormat);
+  } catch (err) {
+    examBusy = false;
+    document.getElementById('exam-generate-btn').disabled = false;
+    setExamGenerateStatus(err.message, 'error', err.retryable ? onGenerateExam : undefined);
+    return;
+  }
+  examBusy = false;
+  document.getElementById('exam-generate-btn').disabled = false;
+
+  if (!res.ok) {
+    // The 200-point guard lands here. Retrying genuinely does fix it, so this one
+    // keeps its button.
+    setExamGenerateStatus(res.refusal, 'error', onGenerateExam);
+    return;
+  }
+
+  const data = loadData();
+  const exam = {
+    id: newId('exam'), deckId: deck.id, subject: deck.examFormat.subject,
+    createdAt: Date.now(), durationMin: deck.examFormat.durationMin,
+    title: res.exam.title, groups: res.exam.groups,
+    answers: {}, startedAt: null, elapsedMs: 0, exceeded: false, pausedAt: null, result: null
+  };
+  saveData({ ...data, exams: [...(data.exams || []), exam] });
+  setExamGenerateStatus('');
+  openExam(exam.id);
+}
+
+/* ── The paper ── */
+
+function openExam(examId) {
+  const exam = getExam(examId);
+  if (!exam) { goDeck(currentDeckId); return; }
+  flushExamSave();          // anything still pending belongs to the PREVIOUS paper
+  currentExamId = examId;
+  currentDeckId = exam.deckId;
+  examClockMode = 'up';
+  setCrumb(exam.subject + ' — Exam');
+  setActiveTab(null);
+  showScreen('exam');
+  renderExam();
+  startExamClock();
+}
+
+function renderExam() {
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+
+  document.getElementById('exam-subject').textContent = exam.subject || 'Exame';
+  document.getElementById('exam-title').textContent = exam.title || 'Exame';
+  // Above the paper, in its own banner — not squeezed into the title bar.
+  const warn = document.getElementById('exam-material-warning');
+  warn.textContent = exam.materialWarning || '';
+  warn.classList.toggle('show', !!exam.materialWarning);
+
+  document.getElementById('exam-start-btn').style.display = exam.startedAt ? 'none' : '';
+  document.getElementById('exam-pause-btn').textContent = exam.pausedAt ? 'Resume' : 'Pause';
+  setArtStatus('exam-submit-status', '');
+
+  let n = 0;
+  document.getElementById('exam-body').innerHTML = exam.groups.map(g => {
+    const pts = g.items.reduce((sum, it) => sum + it.points, 0);
+    const items = g.items.map(it => { n++; return examItemHtml(it, n, exam.answers[it.id]); }).join('');
+    return `<section class="exam-group">
+      <div class="exam-group-head">
+        <h2 class="exam-group-title">${escapeHtml(g.title || g.id)}</h2>
+        <span class="exam-group-points">${escapeHtml(String(pts))} pontos</span>
+      </div>
+      ${items}
+    </section>`;
+  }).join('');
+
+  wireExamInputs();
+  renderExamClockMode();
+  renderExamProgress();
+  renderExamClock();
+}
+
+function examItemHtml(item, n, answer) {
+  const given = answer === undefined ? '' : String(answer);
+  let input;
+  if (item.kind === 'mc') {
+    input = `<div class="exam-options" role="radiogroup" aria-label="Options">` +
+      item.options.map((opt, i) => `
+        <label class="exam-option">
+          <input type="radio" name="exam-${escapeHtml(item.id)}" value="${i}"
+                 data-item="${escapeHtml(item.id)}"${String(i) === given ? ' checked' : ''}>
+          <span>${escapeHtml(opt)}</span>
+        </label>`).join('') + `</div>`;
+  } else if (item.kind === 'short') {
+    input = `<div class="exam-answer"><input type="text" data-item="${escapeHtml(item.id)}"
+      value="${escapeHtml(given)}" placeholder="Your answer"></div>`;
+  } else {
+    input = `<div class="exam-answer"><textarea data-item="${escapeHtml(item.id)}"
+      placeholder="Your answer">${escapeHtml(given)}</textarea></div>`;
+  }
+  return `<article class="exam-item">
+    <div class="exam-item-head">
+      <span class="exam-item-n">${n}.</span>
+      <div class="exam-item-prompt">${escapeHtml(item.prompt)}</div>
+      <span class="exam-item-points">${escapeHtml(String(item.points))} pts</span>
+    </div>
+    ${input}
+  </article>`;
+}
+
+/* Answers autosave on a debounce. Closing the tab mid-exam must not cost the paper —
+   the same localStorage fragility this project has been closing since #19. */
+/* An 18-point item is roughly 200 words. A fixed box hides most of that behind an inner
+   scrollbar, so you write into a window and cannot re-read your own argument — which is
+   exactly what you need to do on an extended-response answer. Diogo hit this sitting the
+   first real paper, 2026-08-27.
+
+   Height is set from scrollHeight, and reset to 'auto' first: without the reset the box
+   can only ever grow, so deleting a paragraph leaves the empty space behind. */
+function autoGrowExamAnswer(el) {
+  if (!el || el.tagName !== 'TEXTAREA') return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(el.scrollHeight, EXAM_ANSWER_MIN_HEIGHT) + 'px';
+}
+
+function wireExamInputs() {
+  document.querySelectorAll('#exam-body [data-item]').forEach(el => {
+    const handler = () => {
+      autoGrowExamAnswer(el);
+      onExamAnswer(el.getAttribute('data-item'), el.value);
+    };
+    if (el.type === 'radio') el.onchange = handler; else el.oninput = handler;
+    // Also on first paint, so an answer restored after F5 opens at its full height
+    // instead of making you scroll to find what you already wrote.
+    autoGrowExamAnswer(el);
+  });
+}
+
+function queueExamSave(patch) {
+  const prev = examPending || {};
+  examPending = { ...prev, ...patch,
+                  answers: { ...(prev.answers || {}), ...(patch.answers || {}) } };
+  clearTimeout(examSaveHandle);
+  examSaveHandle = setTimeout(flushExamSave, 400);
+}
+
+function flushExamSave() {
+  clearTimeout(examSaveHandle);
+  const pending = examPending;
+  examPending = null;
+  if (!pending) return;
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+  // Read fresh, merge, write. Never hold a stale copy across the debounce.
+  saveExam({ ...exam, ...pending, answers: { ...exam.answers, ...(pending.answers || {}) } });
+}
+
+function onExamAnswer(itemId, value) {
+  queueExamSave({ answers: { [itemId]: String(value) } });
+  renderExamProgress();
+}
+
+/* The DOM is the truth while the screen is open — it is ahead of both storage and the
+   buffer between keystrokes. Submit reads through this too, so a debounce that has not
+   fired yet can never cost an answer. */
+function readExamAnswers() {
+  const exam = getExam(currentExamId);
+  const out = { ...(exam ? exam.answers : {}), ...((examPending && examPending.answers) || {}) };
+  document.querySelectorAll('#exam-body [data-item]').forEach(el => {
+    const id = el.getAttribute('data-item');
+    if (el.type === 'radio') { if (el.checked) out[id] = el.value; }
+    else out[id] = el.value;
+  });
+  return out;
+}
+
+function renderExamProgress() {
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+  const p = examProgress(exam, readExamAnswers());
+  document.getElementById('exam-progress').textContent = p.answered + ' / ' + p.total + ' answered';
+}
+
+/* ── The clock ── */
+
+function onStartExam() {
+  const exam = getExam(currentExamId);
+  if (!exam || exam.startedAt) return;
+  exam.startedAt = Date.now();
+  exam.pausedAt = null;
+  saveExam(exam);
+  document.getElementById('exam-start-btn').style.display = 'none';
+  renderExamClock();
+}
+
+/* One place, called by both the toggle and the render. Setting these only inside the
+   toggle left them stale whenever the screen was reopened — the clock counted up while
+   the label under it still read REMAINING. A clock that lies about which direction it
+   is counting is worse than no clock. */
+function renderExamClockMode() {
+  document.getElementById('exam-mode-btn').textContent = examClockMode === 'up' ? 'Count down' : 'Count up';
+  document.getElementById('exam-clock-mode').textContent = examClockMode === 'up' ? 'Elapsed' : 'Remaining';
+}
+
+function onToggleExamClockMode() {
+  examClockMode = examClockMode === 'up' ? 'down' : 'up';
+  renderExamClockMode();
+  renderExamClock();
+}
+
+/* Pausing REBASES startedAt on resume, so the paused stretch is simply not counted.
+   Storing an accumulated total instead would need a second field and a migration for
+   something a rebase does exactly. */
+function onToggleExamPause() {
+  const exam = getExam(currentExamId);
+  if (!exam || !exam.startedAt) return;
+  if (exam.pausedAt) {
+    exam.startedAt = exam.startedAt + (Date.now() - exam.pausedAt);
+    exam.pausedAt = null;
+  } else {
+    exam.pausedAt = Date.now();
+  }
+  saveExam(exam);
+  document.getElementById('exam-pause-btn').textContent = exam.pausedAt ? 'Resume' : 'Pause';
+  renderExamClock();
+}
+
+function startExamClock() {
+  clearInterval(examClockHandle);
+  examClockHandle = setInterval(renderExamClock, 1000);
+}
+
+function renderExamClock() {
+  const screen = document.getElementById('screen-exam');
+  // Self-clearing rather than a hook inside showScreen: one less shared function to
+  // break, and a stray interval cannot outlive the screen.
+  if (!screen || !screen.classList.contains('active')) { clearInterval(examClockHandle); return; }
+
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+  const st = calculateExamTimerState(exam.startedAt, Date.now(), exam.durationMin,
+                                     examClockMode, exam.pausedAt);
+
+  const clock = document.getElementById('exam-clock');
+  clock.textContent = st.label;
+  clock.classList.toggle('over', st.exceeded);
+
+  const over = document.getElementById('exam-overtime');
+  over.classList.toggle('show', st.exceeded);
+  if (st.exceeded) {
+    // Said in words, not colour alone — WCAG 1.4.1, and the #22 habit.
+    over.textContent = 'Over time by ' + formatExamClock(-st.remainingMs) +
+      '. Nothing has been submitted — finish when you are ready.';
+  }
+
+  // Through the same buffer as the answers. Its own timeout would cancel theirs —
+  // which is the bug above, wearing a different hat.
+  if (st.exceeded !== exam.exceeded || (exam.startedAt && exam.elapsedMs !== st.elapsedMs)) {
+    queueExamSave({ exceeded: st.exceeded, elapsedMs: st.elapsedMs });
+  }
+}
+
+/* ── Submit and mark ── */
+
+async function onSubmitExam() {
+  if (examBusy) return;
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+
+  // 0. Take everything on screen, including a debounce that has not fired yet.
+  exam.answers = readExamAnswers();
+  examPending = null;
+  clearTimeout(examSaveHandle);
+
+  // 1. Multiple choice, on the client, instantly and for free.
+  const mc = gradeMultipleChoice(exam, exam.answers);
+
+  // 2. SAVE BEFORE MARKING. This is the safety property of the whole feature: an API
+  //    failure now cannot cost an hour of writing, because the answers are already on
+  //    disk and Try again marks the record that is already there.
+  exam.result = null;
+  saveExam(exam);
+
+  examBusy = true;
+  setArtStatus('exam-submit-status', 'Marking your answers…', 'busy');
+
+  let open;
+  try {
+    open = await callClaudeGrade(exam, exam.answers);
+  } catch (err) {
+    examBusy = false;
+    setArtStatus('exam-submit-status',
+      err.message, 'error', err.retryable ? onSubmitExam : undefined);
+    return;
+  }
+  examBusy = false;
+
+  const perItem = { ...mc, ...open };
+  const score = examScore(perItem, exam);
+  const fresh = getExam(currentExamId);
+  fresh.result = { perItem, total200: score.total200, grade20: score.grade20, gradedAt: Date.now() };
+  saveExam(fresh);
+  setArtStatus('exam-submit-status', '');
+  goExamResult(fresh.id);
+}
+
+function goExamResult(examId) {
+  const exam = getExam(examId);
+  if (!exam) { goDeck(currentDeckId); return; }
+  currentExamId = examId;
+  currentDeckId = exam.deckId;
+  setCrumb(exam.subject + ' — Result');
+  setActiveTab(null);
+  showScreen('exam-result');
+  renderExamResult();
+}
+
+function renderExamResult() {
+  const exam = getExam(currentExamId);
+  if (!exam) return;
+  const res = exam.result;
+
+  document.getElementById('exam-grade20').textContent = res ? res.grade20.toFixed(1) : '—';
+  document.getElementById('exam-total200').textContent =
+    (res ? res.total200 : '—') + ' / ' + EXAM_TOTAL_POINTS;
+  document.getElementById('exam-result-meta').textContent =
+    exam.subject + (exam.elapsedMs ? ' · ' + formatExamClock(exam.elapsedMs) : '');
+
+  if (!res) {
+    document.getElementById('exam-result-body').innerHTML = '';
+    setArtStatus('exam-regrade-status', 'This paper was answered but never marked.',
+                 'error', () => { openExam(exam.id); });
+    return;
+  }
+  setArtStatus('exam-regrade-status', '');
+
+  let n = 0;
+  document.getElementById('exam-result-body').innerHTML = exam.groups.map(g => {
+    const items = g.items.map(it => {
+      n++;
+      const mark = res.perItem[it.id] || { points: 0, max: it.points, comment: '' };
+      const given = String(exam.answers[it.id] === undefined ? '' : exam.answers[it.id]).trim();
+      const shown = it.kind === 'mc'
+        ? (given === '' ? '' : (it.options[Number(given)] || given))
+        : given;
+      const cls = mark.points === mark.max ? ' full' : (mark.points === 0 ? ' zero' : '');
+      const how = it.kind === 'mc' ? 'Marked instantly' : 'Marked by AI against the rubric';
+      return `<article class="exam-mark">
+        <div class="exam-mark-head">
+          <span class="exam-item-n">${n}.</span>
+          <div class="exam-item-prompt">${escapeHtml(it.prompt)}</div>
+          <span class="exam-mark-score${cls}">${escapeHtml(String(mark.points))} / ${escapeHtml(String(mark.max))}</span>
+        </div>
+        <div class="exam-mark-how">${escapeHtml(how)}</div>
+        <div class="exam-mark-yours${shown ? '' : ' blank'}">${shown ? escapeHtml(shown) : 'Left blank'}</div>
+        ${mark.comment ? `<div class="exam-mark-comment">${escapeHtml(mark.comment)}</div>` : ''}
+        ${it.rubric ? `<details class="exam-rubric"><summary>Marking criteria</summary>
+          <p>${escapeHtml(it.rubric)}</p></details>` : ''}
+      </article>`;
+    }).join('');
+    return `<section class="exam-group">
+      <div class="exam-group-head">
+        <h2 class="exam-group-title">${escapeHtml(g.title || g.id)}</h2>
+      </div>
+      ${items}
+    </section>`;
+  }).join('');
+}
+
+/* ── Past sittings, on the deck screen ── */
+
+function renderExamHistory(deckId) {
+  const list = sortExamsNewestFirst((loadData().exams || []).filter(e => e.deckId === deckId));
+  const label = document.getElementById('exam-history-label');
+  const wrap = document.getElementById('exam-history');
+  if (!label || !wrap) return;
+
+  label.style.display = list.length ? '' : 'none';
+  document.getElementById('exam-history-count').textContent = String(list.length);
+  wrap.innerHTML = list.map(e => {
+    const graded = !!e.result;
+    return `<div class="exam-history-row">
+      <div class="exam-history-main">
+        <div class="exam-history-title">${escapeHtml(e.title || e.subject || 'Exame')}</div>
+        <div class="exam-history-when">${escapeHtml(new Date(e.createdAt).toLocaleDateString())}</div>
+      </div>
+      <span class="exam-history-grade${graded ? '' : ' pending'}">${
+        graded ? escapeHtml(e.result.grade20.toFixed(1) + ' / 20') : 'Not marked yet'}</span>
+      <button class="btn btn-outline btn-sm" onclick="${graded
+        ? `goExamResult('${escapeHtml(e.id)}')` : `openExam('${escapeHtml(e.id)}')`}">${
+        graded ? 'Review' : 'Continue'}</button>
+    </div>`;
+  }).join('');
 }
 
 /* ----------------------------------------------------------------

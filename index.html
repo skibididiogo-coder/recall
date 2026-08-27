@@ -205,6 +205,7 @@
         <button class="btn btn-outline" onclick="goGenerateForDeck()">✦ Generate cards</button>
         <button class="btn btn-outline" id="chat-btn" onclick="goChatForDeck()">Chat</button>
         <button class="btn btn-outline" id="artifacts-btn" onclick="goArtifactsForDeck()">Artifacts</button>
+        <button class="btn btn-outline" id="exam-btn" onclick="goExamForDeck()">Exam</button>
         <button class="btn btn-outline" id="quiz-btn" onclick="startQuiz()">Quiz</button>
         <button class="btn btn-outline" id="cram-btn" onclick="startCram()">Cram</button>
         <button class="btn btn-primary" id="study-btn" onclick="startReview()">Study</button>
@@ -246,6 +247,12 @@
         <button class="btn btn-primary" onclick="onAddCard()">Add card</button>
       </div>
     </div>
+
+    <div class="section-label" id="exam-history-label" style="display:none">
+      <h2>Exams</h2>
+      <span class="count" id="exam-history-count">0</span>
+    </div>
+    <div id="exam-history"></div>
 
     <div class="section-label">
       <h2>Cards</h2>
@@ -514,6 +521,122 @@
   </section>
 
   <!-- ============ GENERATE ============ -->
+
+  <!-- ============ EXAM MODE (feature #36) ============
+       Three screens. Setup exists because the official IAVE Informação-Prova is
+       MANDATORY: it is the only thing that can tell Claude the real shape of the
+       exam, and the only place a wrong PDF can be turned away. -->
+
+  <section id="screen-exam-setup" class="screen">
+    <button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="goDeck(currentDeckId)">← Back to deck</button>
+    <div class="page-head">
+      <div>
+        <div class="eyebrow" id="exam-setup-tag">Exam Mode</div>
+        <h1 class="page">Sit a real exam</h1>
+      </div>
+    </div>
+
+    <!-- Corrected 2026-08-26. This used to promise that the Grupos and cotações were
+         read from the document. MEASURED on the real 2026 Informação-Provas for História A
+         and Física e Química A: neither lists them. The page was promising something no
+         official document delivers, and contradicting its own provenance line below. -->
+    <p class="exam-lede">
+      Recall builds a full mock <strong>Exame Nacional</strong> from this deck's own material,
+      following your subject's official <strong>Informação-Prova</strong> — its duration, its
+      200 points, the kinds of question it uses and the themes it covers. One PDF, once per deck.
+      Recall will tell you which parts came from the document and which it chose itself.
+    </p>
+
+    <div class="panel exam-panel">
+      <div class="field">
+        <label for="exam-pdf">Informação-Prova (PDF)</label>
+        <input type="file" id="exam-pdf" accept="application/pdf" onchange="onExamPdfChosen(event)">
+        <div class="field-hint">
+          Download it from <span class="mono-inline">iave.pt</span> — one per subject, per year.
+          Any other PDF will be turned away rather than guessed at.
+        </div>
+      </div>
+      <div class="gen-status" id="exam-format-status"></div>
+    </div>
+
+    <div id="exam-format-summary"></div>
+
+    <div class="exam-generate-row" id="exam-generate-row" style="display:none">
+      <div class="gen-status" id="exam-generate-status"></div>
+      <button class="btn btn-primary" id="exam-generate-btn" onclick="onGenerateExam()">Generate exam</button>
+    </div>
+  </section>
+
+  <section id="screen-exam" class="screen">
+    <div class="exam-bar">
+      <div class="exam-bar-id">
+        <div class="eyebrow" id="exam-subject" style="margin:0">Exame</div>
+        <div class="exam-bar-title" id="exam-title">Exame</div>
+      </div>
+
+      <div class="exam-bar-clock">
+        <div class="exam-clock" id="exam-clock">00:00</div>
+        <div class="exam-clock-mode" id="exam-clock-mode">Elapsed</div>
+      </div>
+
+      <div class="exam-bar-actions">
+        <span class="exam-progress" id="exam-progress">0 / 0 answered</span>
+        <button class="btn btn-outline btn-sm" id="exam-mode-btn" onclick="onToggleExamClockMode()">Count down</button>
+        <button class="btn btn-outline btn-sm" id="exam-start-btn" onclick="onStartExam()">Start</button>
+        <button class="btn btn-outline btn-sm" id="exam-pause-btn" onclick="onToggleExamPause()">Pause</button>
+        <button class="btn btn-primary btn-sm" id="exam-submit-btn" onclick="onSubmitExam()">Submit</button>
+      </div>
+    </div>
+
+    <!-- Claude's own warning about the deck, when it has one. Its own banner because
+         it used to end up in the title: the schema had no other free-text field. -->
+    <div class="exam-material-warning" id="exam-material-warning"></div>
+
+    <div class="exam-overtime" id="exam-overtime"></div>
+    <!-- Said in words, on the screen, because it is a real difference between this
+         and the thing it rehearses. -->
+    <div class="exam-pause-note" id="exam-pause-note">
+      Pause is a study aid. A real Exame Nacional has no pause button — and running out
+      of time here will never submit for you.
+    </div>
+
+    <div class="gen-status" id="exam-submit-status"></div>
+    <div id="exam-body"></div>
+
+    <div class="exam-foot">
+      <button class="btn btn-primary" onclick="onSubmitExam()">Submit for marking</button>
+    </div>
+  </section>
+
+  <section id="screen-exam-result" class="screen">
+    <button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="goDeck(currentDeckId)">← Back to deck</button>
+
+    <!-- Above the mark, never in a footnote. A number out of 20 next to the words
+         "Exame Nacional" reads as authoritative whether or not it has earned it. -->
+    <div class="exam-disclaimer" id="exam-disclaimer">
+      <strong>This is an AI estimated grade, not an official school grade.</strong>
+      Claude marked your open answers against a rubric it wrote itself. Treat it as
+      practice feedback on what to study next, not as a prediction of what a real
+      examiner would give you.
+    </div>
+
+    <div class="exam-grade-panel">
+      <div class="exam-grade-main">
+        <div class="exam-grade-label">Estimated grade</div>
+        <div class="exam-grade20" id="exam-grade20">—</div>
+        <div class="exam-grade-scale">valores (0–20)</div>
+      </div>
+      <div class="exam-grade-side">
+        <div class="exam-grade-label">Cotação</div>
+        <div class="exam-total200" id="exam-total200">— / 200</div>
+        <div class="exam-grade-meta" id="exam-result-meta"></div>
+      </div>
+    </div>
+
+    <div class="gen-status" id="exam-regrade-status"></div>
+    <div id="exam-result-body"></div>
+  </section>
+
   <section id="screen-generate" class="screen">
     <div class="gen-wrap">
       <div class="eyebrow">AI flashcard generation</div>
