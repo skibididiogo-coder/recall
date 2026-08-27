@@ -1973,6 +1973,11 @@ const EXAM_TOTAL_POINTS = 200;          // a national exam is always out of 200
 const EXAM_MIN_DURATION = 15;           // minutes; below this it is not an exam
 const EXAM_MAX_DURATION = 360;          // minutes; above this the PDF was misread
 const EXAM_KINDS = ['mc', 'short', 'long'];
+/* A title is a title. Measured 2026-08-26: given a mismatched deck, Claude wrote a
+   418-character AVISO IMPORTANTE into this field because the schema gave it nowhere
+   else to warn — and it landed in a sticky one-line bar. The channel below is the real
+   fix; this cap is the seatbelt for the next time a model improvises. */
+const EXAM_TITLE_MAX = 120;
 
 function examPad2(n) { return String(n).padStart(2, '0'); }
 
@@ -2140,7 +2145,18 @@ function parseExamResponse(parsed) {
     return { ok: false, refusal: 'Claude built a ' + total + '-point paper instead of ' +
       EXAM_TOTAL_POINTS + '. Generating again usually fixes it.' };
   }
-  return { ok: true, exam: { title: String(parsed.title || 'Exame'), groups: clean } };
+  const title = String(parsed.title || 'Exame').trim() || 'Exame';
+  return {
+    ok: true,
+    exam: {
+      title: title.length > EXAM_TITLE_MAX ? title.slice(0, EXAM_TITLE_MAX - 1) + '…' : title,
+      /* The model's channel to say "I built this, but the deck does not support it".
+         Empty means the material was fine — never undefined, because the banner shows
+         whenever this is non-empty and undefined would flag every exam ever built. */
+      materialWarning: String(parsed.materialWarning || '').trim(),
+      groups: clean
+    }
+  };
 }
 
 /* Multiple choice is marked here, on the client, instantly and for free. Sending it
@@ -6272,6 +6288,10 @@ const EXAM_SCHEMA = {
   type: 'object',
   properties: {
     title: { type: 'string' },
+    // Empty when the deck genuinely supports this exam. One or two sentences when it
+    // does not — this is where "your deck has no History in it" belongs, and the only
+    // reason it is not written into the title instead.
+    materialWarning: { type: 'string' },
     groups: {
       type: 'array',
       items: {
@@ -6305,7 +6325,7 @@ const EXAM_SCHEMA = {
       }
     }
   },
-  required: ['title', 'groups'],
+  required: ['title', 'materialWarning', 'groups'],
   additionalProperties: false
 };
 
@@ -6407,7 +6427,11 @@ async function callClaudeExam(material, format) {
     `identifica o conceito. 4 pontos: identifica e justifica com um exemplo do texto."\n` +
     `6. "mc" items: 4 options, "correct" is the 0-based index. Non-mc items: ` +
     `"options": [], "correct": -1.\n` +
-    `7. Thin material → say so. Never pad, and never invent content the material lacks.`;
+    `7. Thin material → say so. Never pad, and never invent content the material lacks.\n` +
+    `8. "title": a SHORT exam title, under 100 characters. NEVER put a warning in it.\n` +
+    `9. "materialWarning": empty string when the material genuinely supports this exam. ` +
+    `If it does not — wrong subject, too thin, off-topic — put ONE or TWO sentences here ` +
+    `saying what is missing. This is the ONLY place a warning belongs.`;
 
   let res;
   try {
@@ -6763,6 +6787,11 @@ function renderExam() {
 
   document.getElementById('exam-subject').textContent = exam.subject || 'Exame';
   document.getElementById('exam-title').textContent = exam.title || 'Exame';
+  // Above the paper, in its own banner — not squeezed into the title bar.
+  const warn = document.getElementById('exam-material-warning');
+  warn.textContent = exam.materialWarning || '';
+  warn.classList.toggle('show', !!exam.materialWarning);
+
   document.getElementById('exam-start-btn').style.display = exam.startedAt ? 'none' : '';
   document.getElementById('exam-pause-btn').textContent = exam.pausedAt ? 'Resume' : 'Pause';
   setArtStatus('exam-submit-status', '');

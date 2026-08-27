@@ -1002,3 +1002,10 @@ li.tl-item:last-child{padding-bottom:0}
 .exam-format-source.official{background:var(--success-bg);border:1px solid rgba(26,127,55,0.28);color:var(--success)}
 .exam-format-source.proposed{background:var(--warning-bg);border:1px solid rgba(154,103,0,0.3);color:#6b4800}
 .exam-format-source.proposed strong{color:#5a3d00}
+
+/* Claude's warning about the material (feature #36, 2026-08-26). Amber, not red: the
+   exam was still built and is still worth sitting — it just is not what it claims. */
+.exam-material-warning{display:none;background:var(--warning-bg);border:1px solid rgba(154,103,0,0.3);
+  border-radius:var(--r);padding:13px 16px;margin-bottom:14px;font-size:14px;line-height:1.6;
+  color:#6b4800;max-width:78ch;text-wrap:pretty}
+.exam-material-warning.show{display:block}
