@@ -2860,10 +2860,160 @@ function goDeck(deckId) {
   fillLangSelect(document.getElementById('deck-lang'), deck.lang);
   refreshSpeechUi();
   renderExamHistory(deckId);   // feature #36
+  renderSourceRow(deck);       // feature #37
 
   renderCards();
   showScreen('deck');
   setTimeout(() => document.getElementById('card-front').focus(), 50);
+}
+
+/* ── Reference source, impure half (feature #37) ────────────────────────
+   Attach material to a deck WITHOUT generating cards, so a hand-built deck gets
+   grounded Chat, Artifacts and Exam Mode for no API cost. deck.source is read in
+   three places — buildChatContext, the artifact context and the exam context — so
+   one attachment lights up all three. The pure decisions (sourceStatus,
+   sourceAttachState) live in section 9 next to the cap they enforce. */
+
+let sourcePdfDoc = null;   // kept separate from the generate screen's pdfDoc on purpose:
+                           // both can be open in one session and sharing it would let the
+                           // modal silently re-extract the generate screen's file.
+let sourcePdfName = '';    // filename, for the status line
+
+function renderSourceRow(deck) {
+  const row = document.getElementById('deck-source-row');
+  if (!row) return;
+  const st = sourceStatus(deck);
+  // No icon, deliberately: (C) DESIGN.md bans decorative iconography and this app
+  // carries state in WORDS — [FOCUS]/[BREAK], "Overdue". A count is a word too.
+  row.innerHTML = st.attached
+    ? `<span>Reference source · ${st.chars.toLocaleString()} characters</span>` +
+      `<button class="btn btn-ghost btn-sm" onclick="goAttachSourceForDeck()">Update</button>` +
+      `<button class="btn btn-ghost btn-sm" onclick="onRemoveSource()">Remove</button>`
+    : `<span>No reference source attached.</span>` +
+      `<button class="btn btn-ghost btn-sm" onclick="goAttachSourceForDeck()">Attach source</button>`;
+}
+
+function goAttachSourceForDeck() {
+  const deck = getDeck(currentDeckId);
+  if (!deck) return;
+  sourcePdfDoc = null;
+  document.getElementById('source-text').value = deck.source || '';
+  const info = document.getElementById('source-pdf-info');
+  info.className = 'pdf-info';
+  info.textContent = '';
+  document.getElementById('source-pages').value = '';
+  document.getElementById('source-pages-field').style.display = 'none';
+  document.getElementById('source-modal-title').textContent =
+    sourceStatus(deck).attached ? 'Update reference source' : 'Attach reference source';
+  renderSourceCounter();
+  document.getElementById('source-modal').classList.add('open');
+  setTimeout(() => document.getElementById('source-text').focus(), 50);
+}
+
+function closeSourceModal() {
+  document.getElementById('source-modal').classList.remove('open');
+  sourcePdfDoc = null;
+}
+
+/* The counter and the button are rendered from ONE call to sourceAttachState, so the
+   number on screen and the button's enabled state can never disagree. */
+function renderSourceCounter() {
+  const st = sourceAttachState(document.getElementById('source-text').value);
+  const el = document.getElementById('source-counter');
+  const cap = MAX_SOURCE_CHARS.toLocaleString();
+  el.textContent = st.over
+    ? `${st.chars.toLocaleString()} / ${cap} characters — too long by ${(st.chars - MAX_SOURCE_CHARS).toLocaleString()}. Trim it or narrow the pages.`
+    : `${st.chars.toLocaleString()} / ${cap} characters`;
+  el.classList.toggle('over', st.over);
+  document.getElementById('source-save-btn').disabled = !st.canAttach;
+}
+
+async function onSourcePdfChosen(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = ''; // reset so picking the same file again still fires onchange
+  if (!file) return;
+
+  const info = document.getElementById('source-pdf-info');
+  info.className = 'pdf-info';
+
+  if (typeof pdfjsLib === 'undefined') {
+    info.className = 'pdf-info error';
+    info.textContent = 'PDF reader didn’t load — check your connection and refresh.';
+    return;
+  }
+
+  info.textContent = 'Reading PDF…';
+  try {
+    const buf = await file.arrayBuffer();
+    sourcePdfDoc = await pdfjsLib.getDocument({ data: buf }).promise;
+    document.getElementById('source-pages').value = '';
+    document.getElementById('source-pages-field').style.display = 'flex';
+    await extractIntoSourceModal('', file.name);
+  } catch (err) {
+    sourcePdfDoc = null;
+    document.getElementById('source-pages-field').style.display = 'none';
+    info.className = 'pdf-info error';
+    info.textContent = pdfErrorMessage(err);
+  }
+}
+
+async function onApplySourcePages() {
+  if (!sourcePdfDoc) return;
+  await extractIntoSourceModal(document.getElementById('source-pages').value, sourcePdfName);
+}
+
+/* The PDF fills the TEXTAREA rather than bypassing it. One source of truth, so the
+   count you read is the count that gets stored — and a truncated PDF leaves its kept
+   text visible and editable instead of being cut somewhere you cannot see. */
+async function extractIntoSourceModal(rangeInput, fileName) {
+  if (fileName !== undefined) sourcePdfName = fileName;
+  const info = document.getElementById('source-pdf-info');
+  const parsed = parsePageRange(rangeInput, sourcePdfDoc.numPages);
+  if (parsed.error) { info.className = 'pdf-info error'; info.textContent = parsed.error; return; }
+
+  info.className = 'pdf-info';
+  info.textContent = `Extracting ${parsed.pages.length} page${parsed.pages.length === 1 ? '' : 's'}…`;
+
+  const text = await extractPdfText(sourcePdfDoc, parsed.pages);
+  if (!text) {
+    info.className = 'pdf-info error';
+    info.textContent = 'No text found — this looks like a scanned PDF (images, not text). Recall can’t read those yet.';
+    return;
+  }
+
+  const { text: capped, truncated } = capSource(text);
+  document.getElementById('source-text').value = capped;
+  renderSourceCounter();
+
+  const pagesLabel = `${sourcePdfName} · ${parsed.pages.length} page${parsed.pages.length === 1 ? '' : 's'}`;
+  const kb = Math.round(MAX_SOURCE_CHARS / 1000);
+  info.textContent = truncated
+    ? `${pagesLabel} — long PDF, kept the first ~${kb}k characters. Narrow the pages above for the rest.`
+    : `${pagesLabel} · loaded into the box below.`;
+}
+
+function onSaveSource() {
+  const raw = document.getElementById('source-text').value;
+  // The button is already disabled in this state; this is the belt to its braces,
+  // because a disabled button is a UI fact and not a guarantee.
+  if (!sourceAttachState(raw).canAttach) return;
+  updateDeckSource(currentDeckId, capSource(raw.trim()).text);
+  closeSourceModal();
+  toast('Reference source attached');
+  renderSourceRow(getDeck(currentDeckId));
+}
+
+function onRemoveSource() {
+  const deck = getDeck(currentDeckId);
+  if (!deck) return;
+  // Names the consequence in the user's terms, not the data model's.
+  const ok = confirm(`Remove the reference source for "${deck.name}"?\n\n` +
+    `Your flashcards are not deleted, but Chat, Artifacts and Exam Mode will fall ` +
+    `back to cards-only grounding.`);
+  if (!ok) return;
+  updateDeckSource(currentDeckId, '');
+  toast('Reference source removed');
+  renderSourceRow(getDeck(currentDeckId));
 }
 
 function renderCards() {
@@ -3804,6 +3954,39 @@ function capSource(text) {
   return { text: text.slice(0, MAX_SOURCE_CHARS), truncated: true };
 }
 
+/* ── Reference source (feature #37) ─────────────────────────────────────
+   Two pure helpers so a deck can be given material WITHOUT generating cards.
+   The data layer for this already existed — deck.source, updateDeckSource(),
+   the loadData backfill, export/import. All that was missing was a person's
+   way in, so #37 adds UI and exactly these two decisions. */
+
+/* What the deck screen's source row says. Returns the pieces rather than a
+   finished string, so the markup owns the punctuation — chatGrounding() sets
+   that precedent directly below in section 9B.
+   Trims before deciding, because buildChatContext() trims before deciding: a row
+   reading "attached" over a source the chat treats as empty is the UI lying
+   about what the answers are grounded in. */
+function sourceStatus(deck) {
+  const source = deck && typeof deck.source === 'string' ? deck.source.trim() : '';
+  return { attached: source.length > 0, chars: source.length };
+}
+
+/* The character counter and the Attach button are ONE decision, so they are one
+   function and cannot disagree with each other.
+   Over the cap this REFUSES rather than silently clamping — feature #35 set that
+   precedent for the pomodoro durations, and silent truncation of study material is
+   worse than a refused button: you would never learn which half Claude never saw.
+   (The PDF path is the deliberate exception: capSource() truncates and the modal
+   SAYS SO, with the kept text visible in the textarea. See onSourcePdfChosen.) */
+function sourceAttachState(text) {
+  const chars = typeof text === 'string' ? text.trim().length : 0;
+  return {
+    chars,
+    over: chars > MAX_SOURCE_CHARS,
+    canAttach: chars > 0 && chars <= MAX_SOURCE_CHARS
+  };
+}
+
 function pdfErrorMessage(err) {
   const name = err && err.name;
   if (name === 'PasswordException') return 'This PDF is locked with a password — Recall can’t read it.';
@@ -3846,6 +4029,20 @@ async function onApplyPdfPages() {
   await extractIntoSource(document.getElementById('pdf-pages').value);
 }
 
+/* The page-reading loop with no UI in it, so the generate screen and the #37 source
+   modal share one extractor. onExamPdfChosen's comment already made this argument
+   about parsePageRange: "A second page-range parser would be a maintenance bug
+   waiting." The same is true of the loop that feeds it. */
+async function extractPdfText(doc, pageNumbers) {
+  let text = '';
+  for (const n of pageNumbers) {
+    const page = await doc.getPage(n);
+    const content = await page.getTextContent();
+    text += content.items.map(it => it.str).join(' ') + '\n\n';
+  }
+  return text.trim();
+}
+
 async function extractIntoSource(rangeInput) {
   const info = document.getElementById('pdf-info');
   const parsed = parsePageRange(rangeInput, pdfDoc.numPages);
@@ -3854,13 +4051,7 @@ async function extractIntoSource(rangeInput) {
   info.className = 'pdf-info';
   info.textContent = `Extracting ${parsed.pages.length} page${parsed.pages.length === 1 ? '' : 's'}…`;
 
-  let text = '';
-  for (const n of parsed.pages) {
-    const page = await pdfDoc.getPage(n);
-    const content = await page.getTextContent();
-    text += content.items.map(it => it.str).join(' ') + '\n\n';
-  }
-  text = text.trim();
+  const text = await extractPdfText(pdfDoc, parsed.pages);
 
   if (!text) {
     info.className = 'pdf-info error';

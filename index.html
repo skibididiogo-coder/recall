@@ -8,6 +8,10 @@
      shares one localStorage with this tab rather than opening a second, empty library. -->
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#F0F0EE">
+<!-- Chrome asks for /favicon.ico on every page load whether you declare one or not.
+     Without this line that is a 404 on every visit, including production. Found by
+     (C) live-source-check.mjs V19, which names the URL rather than just counting. -->
+<link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
 <!-- Fonts are vendored into fonts/ (feature #26): Google Fonts cannot be relied on with
      the wifi off, and this also drops a render-blocking cross-origin request. The
@@ -245,6 +249,10 @@
       <summary>Summary <span class="deck-summary-hint">AI-written from your imported material</span></summary>
       <p class="summary-text" id="deck-summary-text"></p>
     </details>
+
+    <!-- Reference source (feature #37). Material for Chat / Artifacts / Exam Mode on a
+         deck whose cards were made by hand. Rendered by renderSourceRow(). -->
+    <div class="source-row" id="deck-source-row"></div>
 
     <div class="panel">
       <div class="field">
@@ -748,6 +756,40 @@
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeDeckModal()">Cancel</button>
       <button class="btn btn-primary" onclick="onCreateDeck()">Create deck</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ REFERENCE SOURCE MODAL (feature #37) ============ -->
+<div class="modal-backdrop" id="source-modal" onclick="if(event.target===this)closeSourceModal()">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="source-modal-title">
+    <h2 id="source-modal-title">Attach reference source</h2>
+    <div class="modal-sub">Material for Chat, Artifacts and Exam Mode to work from. No cards
+      are generated and nothing is sent to Claude right now.</div>
+    <div class="field">
+      <div class="pdf-row">
+        <button type="button" class="btn btn-outline btn-sm"
+                onclick="document.getElementById('source-pdf-file').click()">📄 Choose PDF</button>
+        <input type="file" id="source-pdf-file" accept="application/pdf" hidden
+               onchange="onSourcePdfChosen(event)">
+        <span class="pdf-info" id="source-pdf-info"></span>
+      </div>
+      <div class="field pdf-pages-field" id="source-pages-field" style="display:none">
+        <label for="source-pages">Pages <span class="pages-hint">(optional — e.g. 3-8, blank = all)</span></label>
+        <div class="pdf-pages-row">
+          <input id="source-pages" type="text" placeholder="all" autocomplete="off"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();onApplySourcePages();}">
+          <button type="button" class="btn btn-outline btn-sm" onclick="onApplySourcePages()">Apply</button>
+        </div>
+      </div>
+      <label for="source-text">Reference text</label>
+      <textarea id="source-text" style="min-height:200px" oninput="renderSourceCounter()"
+                placeholder="Paste your notes, a chapter, a transcript — or choose a PDF above…"></textarea>
+      <div class="source-counter" id="source-counter"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeSourceModal()">Cancel</button>
+      <button class="btn btn-primary" id="source-save-btn" onclick="onSaveSource()">Attach reference</button>
     </div>
   </div>
 </div>

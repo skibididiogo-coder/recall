@@ -663,6 +663,19 @@ h1.page{font-family:var(--font-display);font-weight:300;font-size:36px;letter-sp
   *,*::before,*::after{animation-duration:0.01ms!important;transition-duration:0.01ms!important}
   .spinner{animation:spin 700ms linear infinite!important}
 }
+/* ── Reference source (feature #37) ─────────────────────────────
+   One quiet line under the Summary panel. It is the sixth thing on the deck
+   screen's vertical stack, so it gets the secondary ink and no border — it
+   reports a fact, it is not a panel competing with the card editor below it. */
+.source-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  margin-bottom:22px;font-size:13px;color:var(--ink-2)}
+.source-counter{margin-top:8px;font-size:12px;color:var(--ink-2);
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+/* Over the cap is carried by WEIGHT and by the sentence itself ("too long by N"),
+   never by colour — same rule as .asg-row.overdue. The palette is monochrome and a
+   state a colour-blind reader cannot parse is not a state. WCAG 1.4.1 for free. */
+.source-counter.over{color:var(--ink);font-weight:600}
+
 /* ── Assignments (feature #27) ──────────────────────────────────
    No colour anywhere in here, deliberately. Overdue is carried by a left rule, a
    heavier weight and the WORD "Overdue" in the markup. This app has no colour-alarm
