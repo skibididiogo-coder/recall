@@ -479,6 +479,10 @@ const BACKUP_AT_KEY = 'recall.lastBackup';
 
 let dataReadFailed = false;
 let dataReadFailReason = '';
+// The write-side twin of the two above (2026-08-28). A full browser is a
+// different failure from an unreadable save, and needs different advice.
+let saveFailed = false;
+let saveFailReason = '';
 
 function lastBackupAt() { return localStorage.getItem(BACKUP_AT_KEY); }
 
@@ -488,6 +492,16 @@ function lastBackupAt() { return localStorage.getItem(BACKUP_AT_KEY); }
 function renderBackupNudge() {
   const el = document.getElementById('backup-nudge');
   if (!el) return;
+
+  // A failed WRITE comes first: it is the more recent event, and the advice differs.
+  if (saveFailed) {
+    el.className = 'backup-nudge danger';
+    el.style.display = '';
+    el.innerHTML =
+      `<div><strong>Your last change was not saved.</strong> ${escapeHtml(saveFailReason)}</div>
+       <button class="btn btn-outline btn-sm" onclick="exportData()">Export a backup</button>`;
+    return;
+  }
 
   if (dataReadFailed) {
     el.className = 'backup-nudge danger';
@@ -619,13 +633,52 @@ function loadData() {
    that is the user explicitly saying "replace everything". Without it, corrupt
    data would be unrecoverable from inside the app, because the guard would also
    block the one action that fixes it. */
+/* A failed WRITE, as opposed to #19's failed READ. Pure, and shaped like
+   pdfErrorMessage(): the browser's own text ("Setting the value of 'recall.data'
+   exceeded the quota") is not something to put in front of a person.
+   Three spellings because three browsers disagree: Chrome and Safari throw
+   QuotaExceededError, Firefox throws NS_ERROR_DOM_QUOTA_REACHED, and older Safari
+   throws code 22. Matching only the Chrome one would leave the other two reported as
+   an unknown error on the exact browsers most likely to be full. */
+function saveErrorMessage(err) {
+  const name = err && err.name;
+  const isQuota = name === 'QuotaExceededError' ||
+                  name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+                  name === 'QUOTA_EXCEEDED_ERR' ||
+                  (err && err.code === 22);
+  if (isQuota) {
+    return 'Your browser storage is full, so this change was NOT saved. ' +
+           'Nothing you already had has been lost. Export a backup, then remove a ' +
+           'reference source or a deck you no longer need.';
+  }
+  return 'This change was NOT saved (' + (name || 'unknown error') + '). ' +
+         'Nothing you already had has been lost. Export a backup before making more changes.';
+}
+
 function saveData(data, opts) {
   if (dataReadFailed && !(opts && opts.force)) {
     console.error('Refusing to save: your existing data could not be read (' + dataReadFailReason +
                   '). Saving now would overwrite it. Download the raw data, then import a backup.');
     return false;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  // A FULL localStorage throws here. Until 2026-08-28 this line was naked, the
+  // exception escaped saveData entirely, and it took the CALLER down with it —
+  // createDeck simply did not create the deck and nothing anywhere said so. That was
+  // MEASURED, not suspected, and it is the #19 shape: a write path failing where
+  // nobody can see it. The write lock above guards a bad READ; this guards a bad WRITE.
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (err) {
+    saveFailed = true;
+    saveFailReason = saveErrorMessage(err);
+    console.error('Save failed: ' + saveFailReason);
+    // Tell the person NOW, not the next time they happen to open the decks screen.
+    // typeof-guarded because saveData is unit-tested in Node, where there is no DOM.
+    if (typeof document !== 'undefined') renderBackupNudge();
+    return false;
+  }
+  saveFailed = false;          // this write went through; whatever was full isn't blocking now
+  saveFailReason = '';
   dataReadFailed = false;      // whatever was wrong, this write resolved it
   dataReadFailReason = '';
 
@@ -3851,7 +3904,17 @@ let generatedSource = '';  // the source text itself, saved onto the deck so Cha
 let genTargetDeckId = null; // if set when arriving, preselect this deck
 let pdfDoc = null;          // loaded pdf.js document, kept so page re-extraction skips re-reading the file
 let pdfName = '';           // filename, for the status line
-const MAX_SOURCE_CHARS = 15000; // cap on text sent to Claude in one call (~6–8 dense pages)
+/* The cap on ONE deck's reference material. Raised 15,000 -> 60,000 on 2026-08-28.
+   The old value was never measured. Its comment said "text sent to Claude in one call",
+   but Sonnet 5 has a 1,000,000-token context window and 15,000 characters is roughly
+   4,000 tokens — 0.4% of it. The API was never the constraint.
+   The real ceiling is localStorage: ~5 MB per origin, shared by every deck, card, exam
+   and log entry. 60,000 characters is about 40 pages, a full textbook chapter; twenty
+   decks at that size is ~2.4 MB, which fits with room to spare.
+   It is not raised further because the browser fills up long before Claude does — and
+   as of today a full browser is REPORTED (see saveErrorMessage) instead of throwing an
+   exception that killed its caller in silence. That fix is what makes this safe. */
+const MAX_SOURCE_CHARS = 60000;
 
 /* Schema that forces Claude to return a clean summary + {front, back} objects. */
 const CARD_SCHEMA = {
@@ -4239,7 +4302,7 @@ function saveGenerated() {
    The block must stay contiguous and self-contained: nothing in it may
    reference a symbol defined elsewhere in app.js. ── */
 
-const CHAT_CONTEXT_MAX = 15000; // same budget as generation (~6–8 dense pages)
+const CHAT_CONTEXT_MAX = 60000; // same budget as generation — check S11 pins that they agree
 const CHAT_HISTORY_MAX = 10;    // messages resent per call (5 exchanges). Even on
                                 // purpose: a capped slice of complete user→assistant
                                 // exchanges always starts with a 'user' message.
@@ -4554,7 +4617,7 @@ function onNewConversation() {
    The block must stay contiguous and self-contained: nothing in it may
    reference a symbol defined elsewhere in app.js. ── */
 
-const TABLE_CONTEXT_MAX = 15000; // same budget as generation and chat
+const TABLE_CONTEXT_MAX = 60000; // same budget as generation and chat — pinned by check S11
 const TABLE_COLS_MIN = 2;        // a "comparison" of one thing isn't one
 const TABLE_COLS_MAX = 5;        // wider than 5 stops being readable
 const TABLE_ROWS_MIN = 3;        // fewer than 3 rows isn't worth a table
