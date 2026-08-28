@@ -4,7 +4,7 @@
 // Keeps its exact filename (no "(C)" prefix) because a service worker's PATH defines
 // its scope — it must sit at the app root. Tool-imposed name, per the vault CLAUDE.md.
 
-const BUILD_ID = 'b0b5bb72cda8';
+const BUILD_ID = 'a1730992b841';
 const CACHE    = 'recall-' + BUILD_ID;
 const SHELL    = new URL('./index.html', self.location).href;
 
@@ -136,6 +136,8 @@ const PRECACHE = [
   'index.html',
   'manifest.json',
   'styles.css',
+  'vendor/pdf.min.js',
+  'vendor/pdf.worker.min.js',
 ];
 
 /* ── PURE — routing decisions, extracted and tested by (C) test-pwa.mjs.

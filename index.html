@@ -16,9 +16,15 @@
 <!-- Fonts are vendored into fonts/ (feature #26): Google Fonts cannot be relied on with
      the wifi off, and this also drops a render-blocking cross-origin request. The
      @font-face rules live at the top of styles.css. -->
-<!-- pdf.js (Mozilla) — reads text out of PDFs, entirely in the browser. Loaded from a CDN;
-     fine because PDF import only feeds AI generation, which already needs the internet. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- pdf.js 3.11.174 (Mozilla, Apache-2.0) — reads text out of PDFs, entirely in the
+     browser. VENDORED, not from a CDN (2026-08-28).
+     It used to load from cdnjs, justified as "fine because PDF import only feeds AI
+     generation, which already needs the internet". Feature #37 killed that sentence:
+     attaching a reference source costs ZERO API calls, so there is now a PDF path that
+     needs no network for its purpose — and it failed offline anyway, inside an app whose
+     headline claim is that it works offline. Both this and its worker (see app.js) are
+     now precached. Pinned to the exact version that was on the CDN. -->
+<script src="vendor/pdf.min.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>

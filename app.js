@@ -7,8 +7,10 @@
 
 // pdf.js needs to know where its background worker script lives.
 // (Moved here from an inline <script> during the file split.)
-if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc =
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// VENDORED 2026-08-28. Self-hosting pdf.min.js alone would have fixed NOTHING:
+// getDocument() cannot run without this worker, so a local library plus a CDN worker
+// dies offline in exactly the same place. Two files, one bug — check B27 pins it.
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 
 /* ================================================================
    RECALL v2
