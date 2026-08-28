@@ -50,6 +50,19 @@
   </div>
 </nav>
 
+<!-- The update handoff (2026-08-01). NOT a toast: a toast disappears after 1.6s and
+     has nothing to click, which is exactly the state that left ⌘Q as the only way to
+     pick up a new build. This stays until it is acted on or dismissed.
+
+     Lives HERE, between the nav and <main>, and not at the end of <body>, because it is
+     IN FLOW (2026-08-28). As a fixed overlay it covered whatever sat in the first row of
+     content — "Show answer" in August, then the pomodoro reset. See the CSS note. -->
+<div id="update-bar" hidden>
+  <span id="update-bar-text"></span>
+  <button class="btn btn-primary" id="update-bar-action" onclick="onTakeUpdate()"></button>
+  <button class="btn btn-ghost" onclick="dismissUpdateBar()" aria-label="Dismiss">Later</button>
+</div>
+
 <main>
   <!-- ============ DECKS HOME ============ -->
   <!-- ============ HOME (dashboard) ============
@@ -856,15 +869,6 @@
 </div>
 
 <div id="toast"></div>
-
-<!-- The update handoff (2026-08-01). NOT a toast: a toast disappears after 1.6s and
-     has nothing to click, which is exactly the state that left ⌘Q as the only way to
-     pick up a new build. This stays until it is acted on or dismissed. -->
-<div id="update-bar" hidden>
-  <span id="update-bar-text"></span>
-  <button class="btn btn-primary" id="update-bar-action" onclick="onTakeUpdate()"></button>
-  <button class="btn btn-ghost" onclick="dismissUpdateBar()" aria-label="Dismiss">Later</button>
-</div>
 
 <!-- Which Kokoro clips exist on disk, written by 04 System/(C) kokoro-build-audio.py.
      Loaded as a <script> and not fetched on purpose: fetch() is blocked on file://

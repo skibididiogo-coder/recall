@@ -633,15 +633,24 @@ h1.page{font-family:var(--font-display);font-weight:300;font-size:36px;letter-sp
 /* Update handoff bar (2026-08-01). Sits above the toast and, unlike it, persists and
    is clickable — a self-dismissing message is what made ⌘Q the only way to take a
    new build. [hidden] needs the !important because the flex display would win. */
-/* Anchored TOP-RIGHT, not bottom-centre. A bottom bar covered the "Show answer" button
-   at 900x600 — the primary study action, hidden behind a version notice. The toast can
-   live at the bottom because it clears itself in 1.6s; this one persists until acted on,
-   so it has to sit where nothing is ever clicked. Caught by screenshotting the review
-   screen at a short viewport, and pinned by L14/L15 in (C) live-update-check.mjs. */
-#update-bar{position:fixed;top:72px;right:20px;z-index:70;
+/* IN FLOW under the nav, right-aligned to the content column (2026-08-28).
+   It used to be position:fixed at top:72px/right:20px, floating over the first row of
+   whatever screen you were on. That is a placement that can only ever be "somewhere
+   nothing is clicked YET": bottom-centre covered "Show answer" at 900x600, it was moved
+   to the top-right, and then #34 put the pomodoro reset button in the new spot and it
+   covered THAT — L14/L15 in (C) live-update-check.mjs, failing since 2026-08-25.
+   Twice in one month is a design answer, not a coordinate answer. A bar that occupies
+   layout space cannot cover anything, at any viewport, so the whole class of bug is gone
+   rather than relocated.
+   NOT sticky, deliberately: a sticky bar covers whatever scrolls underneath it, which is
+   the same bug with a delay. It stays visible in practice because go() does
+   window.scrollTo(0, 0) on every screen change (app.js), so the top of the page is where
+   this app almost always is. width:fit-content is what makes margin-left:auto right-align
+   it; without it the block fills the line and the auto margin resolves to zero. */
+#update-bar{width:fit-content;max-width:min(92vw,420px);margin:14px 20px 0 auto;
   display:flex;align-items:center;gap:10px;background:var(--ink);color:var(--on-inverse);
   padding:10px 12px 10px 18px;border-radius:var(--r);font-size:13px;font-weight:500;
-  max-width:min(92vw,420px);box-shadow:0 6px 24px rgba(0,0,0,0.18)}
+  box-shadow:0 6px 24px rgba(0,0,0,0.18)}
 #update-bar[hidden]{display:none !important}
 /* Inverted: btn-primary is black on black inside this bar, so the main action read as
    a plain label with no edge. Caught by screenshotting it, not by any check. */
