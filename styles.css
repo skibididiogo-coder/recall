@@ -1033,3 +1033,795 @@ li.tl-item:last-child{padding-bottom:0}
   border-radius:var(--r);padding:13px 16px;margin-bottom:14px;font-size:14px;line-height:1.6;
   color:#6b4800;max-width:78ch;text-wrap:pretty}
 .exam-material-warning.show{display:block}
+
+/* ============================================================
+   v6 — MONOCHROME FUTURIST
+   Design handoff 2026-08-30 (01 Design/design_handoff_recall/).
+   Reference: "Recall v6.html". Where the README's prose and the
+   prototype disagree, the PROTOTYPE wins — it is the artefact
+   the README itself calls "the reference".
+
+   Appended at the end on purpose: later rules win, so this
+   section migrates the app screen by screen without having to
+   delete the v2 rules above in the same pass.
+   ============================================================ */
+:root {
+  /* Motion. ONE curve for the whole app — the handoff is explicit
+     that there is no second easing anywhere. */
+  --ease:cubic-bezier(0.16,1,0.3,1);
+  --t-view:340ms;   /* screen enter, directional */
+  --t-rise:420ms;   /* list rows and cards, staggered */
+  --t-fade:300ms;   /* generated panels */
+  --t-tick:260ms;   /* the tick primitive drawing itself */
+  --t-flip:420ms;   /* flashcard face */
+  --t-hover:160ms;  /* every hover, without exception */
+  --t-rail:200ms;   /* sidebar width */
+
+  /* Geometry */
+  --rail-w:240px;
+  --rail-w-min:72px;
+  --col:1000px;
+  --col-pad:64px;
+  --header-h:64px;
+
+  /* Display type scale */
+  --fs-display:62px;
+  --fs-hero:122px;   /* the due-count numeral on Today */
+  --fs-streak:78px;
+  --fs-card:40px;    /* flashcard face */
+  --ls-display:-0.03em;
+  --ls-mono:0.14em;
+
+  /* v6 is FLAT: 1px hairlines replace every card border and every
+     shadow. Neutralised here rather than deleted above so the
+     change is one line to read and one line to revert. */
+  --shadow-sm:none; --shadow:none; --shadow-lift:none;
+}
+
+/* ── Motion primitives ──────────────────────────────────────
+   fill-mode backwards on every entrance: an element is never
+   stranded at opacity 0 if a frame or a timer is dropped. */
+@keyframes rcRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@keyframes rcFade{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes rcTick{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes rcGrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes rcGrowY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes rcFlip{from{opacity:0;transform:rotateX(-62deg)}to{opacity:1;transform:none}}
+@keyframes rcViewDown{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes rcViewUp{from{opacity:0;transform:translateY(-18px)}to{opacity:1;transform:none}}
+
+/* The prototype gates motion on document.hidden because that is all a
+   prototype tool can see. The handoff says to gate on this instead. */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+
+/* ── Mono label: the single most repeated device in the design.
+   Every label, index, unit and metadata string is this. ── */
+.m-label{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2)}
+
+/* ── Tick: the universal progress primitive. Streak days, mastery,
+   XP, session position — same shape everywhere, only count and
+   fill change. ── */
+.ticks{display:flex;gap:2px}
+.ticks-3{gap:3px}
+.tick{flex:1;background:var(--border);transform-origin:left center}
+.tick.on{background:var(--ink)}
+.tick.cur{background:var(--warning)}
+.tick.anim{animation:rcTick var(--t-tick) var(--ease) backwards}
+
+/* ============================================================
+   SHELL — sidebar + content column
+   ============================================================ */
+body{font-variant-numeric:tabular-nums}
+.shell{display:flex;min-height:100vh}
+
+.rail{flex:0 0 var(--rail-w);width:var(--rail-w);background:var(--surface-1);
+  border-right:1px solid var(--border);position:sticky;top:0;height:100vh;
+  display:flex;flex-direction:column;transition:width var(--t-rail) cubic-bezier(0,0,0.2,1)}
+.rail.collapsed{flex-basis:var(--rail-w-min);width:var(--rail-w-min)}
+
+.rail-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:20px 16px;border-bottom:1px solid var(--border)}
+.rail.collapsed .rail-head{flex-direction:column;align-items:center;gap:12px;padding:20px 0 14px}
+.rail-brand{display:flex;align-items:center;gap:12px;cursor:pointer;min-width:0;background:none;border:none;padding:0}
+.rail-brand svg{width:28px;height:28px;border-radius:2px;flex-shrink:0;fill:var(--ink)}
+.rail.collapsed .rail-brand svg{width:32px;height:32px}
+.rail-wordmark{font-family:var(--font-display);font-weight:400;font-size:20px;letter-spacing:-0.01em;white-space:nowrap}
+.rail-toggle{background:transparent;border:none;cursor:pointer;font-family:var(--font-mono);
+  font-size:13px;font-weight:500;color:var(--ink-2);padding:6px 8px;flex-shrink:0;transition:color var(--t-hover)}
+.rail-toggle:hover{color:var(--ink)}
+.rail.collapsed .rail-toggle{width:32px;height:26px;padding:0;border:1px solid var(--border);
+  border-radius:var(--r-sm);font-size:12px;transition:border-color var(--t-hover),color var(--t-hover)}
+.rail.collapsed .rail-toggle:hover{border-color:var(--ink);color:var(--ink)}
+
+/* The rail scrolls without reserving a gutter, so its children stay
+   centred on the rail axis when collapsed. */
+.rail-nav{flex:1;overflow-y:auto;padding:12px 0 32px;
+  scrollbar-width:none;-ms-overflow-style:none;
+  mask-image:linear-gradient(to bottom,#000 calc(100% - 32px),transparent);
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 32px),transparent)}
+.rail-nav::-webkit-scrollbar{width:0;height:0;display:none}
+
+.rail-group{padding:14px 20px 6px;font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2);white-space:nowrap}
+.rail.collapsed .rail-group{height:1px;background:var(--border);margin:10px 20px;padding:0;overflow:hidden;text-indent:-999em}
+
+.rail-item{width:100%;display:flex;align-items:center;gap:12px;padding:9px 20px;justify-content:flex-start;
+  background:transparent;color:var(--ink);border:none;cursor:pointer;text-align:left;transition:background var(--t-hover)}
+.rail-item:hover{background:var(--surface-2)}
+.rail-item.active{background:var(--ink);color:var(--on-inverse)}
+.rail-item.active:hover{background:var(--ink)}
+.rail.collapsed .rail-item{gap:0;padding:11px 0;justify-content:center;position:relative}
+.rail-idx{font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--ink-2);flex-shrink:0}
+.rail-item.active .rail-idx{color:var(--on-inverse)}
+.rail-label{font-size:14px;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rail-item.active .rail-label{font-weight:600}
+.rail.collapsed .rail-label{display:none}
+.rail-badge{margin-left:auto;font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--warning);flex-shrink:0}
+.rail-item.active .rail-badge{color:var(--on-inverse)}
+.rail.collapsed .rail-badge{position:absolute;top:9px;right:14px;width:5px;height:5px;
+  border-radius:var(--r-full);background:var(--warning);margin:0;text-indent:-999em;overflow:hidden}
+.rail.collapsed .rail-item.active .rail-badge{background:var(--on-inverse)}
+/* Screens the design specifies but the app has not built yet. Reachable-looking
+   but honest: dimmed and not clickable, rather than a link into an empty room. */
+.rail-item[disabled]{opacity:0.38;cursor:not-allowed}
+.rail-item[disabled]:hover{background:transparent}
+
+.rail-foot{border-top:1px solid var(--border);padding:16px}
+.rail.collapsed .rail-foot{padding:16px 8px}
+.rail-user{display:flex;align-items:center;gap:12px;cursor:pointer;min-width:0;background:none;border:none;width:100%;text-align:left}
+.rail.collapsed .rail-user{justify-content:center}
+.rail-avatar{width:28px;height:28px;background:var(--ink);color:var(--on-inverse);display:flex;
+  align-items:center;justify-content:center;border-radius:var(--r-sm);font-family:var(--font-mono);
+  font-size:11px;font-weight:500;flex-shrink:0}
+.rail-user-meta{min-width:0}
+.rail.collapsed .rail-user-meta{display:none}
+.rail-user-name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── Main column ── */
+.shell > main{flex:1;min-width:0;max-width:none;margin:0;padding:0}
+.topbar{position:sticky;top:0;z-index:30;background:rgba(240,240,238,0.88);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.topbar-inner{max-width:var(--col);margin:0 auto;padding:0 var(--col-pad);height:var(--header-h);
+  display:flex;align-items:center;justify-content:space-between;gap:24px}
+.topbar-where{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-right{display:flex;align-items:center;gap:16px;flex-shrink:0}
+.topbar-offline{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:var(--success)}
+.topbar-due{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:var(--warning)}
+.col{max-width:var(--col);margin:0 auto;padding:var(--col-pad) var(--col-pad) 96px}
+
+/* Directional screen entrance. showScreen() sets the direction by comparing
+   the target's index in the flat nav list against the current one. */
+.screen{animation:none}
+.screen.active{display:block;animation:rcViewDown var(--t-view) var(--ease) backwards}
+.screen.active.enter-up{animation-name:rcViewUp}
+
+/* ============================================================
+   01 TODAY
+   ------------------------------------------------------------
+   Restyles the EXISTING dashboard markup rather than replacing it.
+   Focus mode (#30) hides #dash-header / #dash-stats-panel /
+   #dash-browse-btn by id, and live-focus-check pins those ids — so
+   the v6 hero is built by restyling .dashA-top, .due-panel and
+   .stats-panel in place, not by writing new elements over them.
+   ============================================================ */
+#screen-home .dash-header{display:block;margin-bottom:64px;border:none;padding:0}
+#screen-home .dash-date{font-family:var(--font-ui);font-size:16px;font-weight:400;
+  letter-spacing:0;text-transform:none;color:var(--ink-2);margin-bottom:0;order:2}
+#screen-home .dash-h1{font-family:var(--font-display);font-weight:200;font-size:var(--fs-display);
+  letter-spacing:var(--ls-display);line-height:1;margin-bottom:12px}
+
+/* The hero: one dark band, two columns split by a hairline. */
+#screen-home .dashA-top{display:flex;grid-template-columns:none;gap:0;background:var(--inverse);
+  color:var(--on-inverse);margin-bottom:80px;border-radius:0}
+#screen-home .due-panel{flex:1.5;min-width:0;background:transparent;border:none;border-radius:0;
+  padding:40px;display:flex;flex-direction:column;justify-content:space-between;gap:0}
+#screen-home .stats-panel{flex:1;background:transparent;border:none;border-radius:0;
+  border-left:1px solid rgba(240,240,238,0.12);padding:40px;
+  display:flex;flex-direction:column;justify-content:space-between;gap:0}
+
+#screen-home .due-label,#screen-home .stats-panel-label{font-family:var(--font-mono);font-size:11px;
+  font-weight:500;letter-spacing:var(--ls-mono);text-transform:uppercase;
+  color:rgba(240,240,238,0.65);margin-bottom:24px}
+#screen-home .due-num{display:flex;align-items:baseline;gap:16px}
+#screen-home .due-big{font-family:var(--font-display);font-weight:100;font-size:var(--fs-hero);
+  line-height:0.8;letter-spacing:-0.04em}
+#screen-home .due-unit{font-family:var(--font-mono);font-size:13px;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:rgba(240,240,238,0.65)}
+#screen-home .due-sub{color:rgba(240,240,238,0.65);font-size:14px;margin-top:14px;line-height:1.6;max-width:46ch}
+#screen-home .due-actions{margin-top:40px;gap:12px}
+
+/* Primary action inverts on the dark band: paper on ink. */
+#screen-home .due-actions .btn-dark,#screen-home .due-actions .btn-primary{
+  background:var(--bg);color:var(--ink);border:none;border-radius:var(--r);
+  padding:16px 32px;font-size:16px;font-weight:600;
+  transition:background var(--t-hover),transform 90ms var(--ease)}
+#screen-home .due-actions .btn-dark:hover:not(:disabled),
+#screen-home .due-actions .btn-primary:hover:not(:disabled){background:#fff}
+#screen-home .due-actions .btn-dark:active,#screen-home .due-actions .btn-primary:active{transform:translateY(1px)}
+#screen-home .due-actions .btn-dark:disabled{opacity:0.4;cursor:not-allowed}
+#screen-home .due-actions .btn-outline{background:transparent;color:rgba(240,240,238,0.65);
+  border:1px solid rgba(240,240,238,0.24);border-radius:var(--r);padding:16px 24px;font-size:16px;font-weight:500;
+  transition:border-color var(--t-hover),color var(--t-hover)}
+#screen-home .due-actions .btn-outline:hover{border-color:var(--on-inverse);color:var(--on-inverse)}
+
+/* Streak column: the number is the point, the ticks are the evidence. */
+#screen-home .stats-list{display:block}
+#screen-home .stat-row{display:block}
+#screen-home .stat-row:first-child .stat-n{font-family:var(--font-display);font-weight:100;
+  font-size:var(--fs-streak);line-height:0.85;display:block}
+#screen-home .stat-row:first-child .stat-l{display:none}
+#screen-home .stat-divider{display:none}
+#screen-home .stat-row ~ .stat-row{display:flex;align-items:baseline;justify-content:space-between;
+  gap:12px;margin-top:10px}
+#screen-home .stat-row ~ .stat-row .stat-n{font-family:var(--font-mono);font-size:13px;font-weight:500;line-height:1.6}
+#screen-home .stat-row ~ .stat-row .stat-l{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:rgba(240,240,238,0.65)}
+#screen-home .streak-ticks{margin-top:32px}
+#screen-home .streak-ticks .tick{height:24px;background:rgba(240,240,238,0.16)}
+#screen-home .streak-ticks .tick.on{background:var(--on-inverse)}
+
+/* Focus mode (#30) keeps working: one column, the number centred. */
+.home-focus .dashA-top{flex-direction:column;max-width:560px;margin:6vh auto 0}
+.home-focus .due-panel{align-items:center;text-align:center}
+.home-focus .due-actions{justify-content:center}
+
+/* "Up next" — a heavy ink rule opens the band, hairlines separate the rows. */
+.band-head{border-bottom:1px solid var(--ink);padding-bottom:12px;font-family:var(--font-mono);
+  font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);text-transform:uppercase}
+.upnext-row{display:grid;grid-template-columns:32px 1fr 120px 90px;gap:24px;align-items:center;
+  padding:24px 8px;border:none;border-bottom:1px solid var(--border);cursor:pointer;
+  background:none;width:100%;text-align:left;transition:background var(--t-hover)}
+.upnext-row:hover{background:var(--surface-1)}
+.upnext-idx{font-family:var(--font-mono);font-size:11px;font-weight:500;color:var(--ink-2)}
+.upnext-title{font-family:var(--font-display);font-weight:400;font-size:25px;letter-spacing:-0.01em}
+.upnext-tag{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:var(--ink-2)}
+.upnext-due{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:var(--warning);text-align:right}
+.rise{animation:rcRise var(--t-rise) var(--ease) backwards}
+
+/* ============================================================
+   02 REVIEW
+   ============================================================ */
+.mode-tabs{display:flex;gap:4px;padding:4px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:24px}
+.mode-tab{flex:1;padding:12px;background:transparent;color:var(--ink-2);border:none;border-radius:var(--r-sm);
+  cursor:pointer;font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;transition:background var(--t-hover),color var(--t-hover)}
+.mode-tab:hover{background:var(--surface-1);color:var(--ink)}
+.mode-tab.active{background:var(--ink);color:var(--on-inverse)}
+.mode-note{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:var(--ink-2);line-height:1.6;margin-bottom:24px}
+.study-meta{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
+.study-pos{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono)}
+.study-timer{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);color:var(--error)}
+.study-ticks{margin-bottom:48px}
+.study-ticks .tick{height:6px}
+
+.card-face{background:#fff;border:1px solid var(--border);border-radius:var(--r);min-height:340px;
+  padding:64px;display:flex;flex-direction:column;cursor:pointer;transition:border-color var(--t-hover)}
+.card-face:hover{border-color:var(--ink)}
+.card-face-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:40px}
+.card-face-body{flex:1;display:flex;align-items:center;perspective:1200px}
+.card-face-text{font-family:var(--font-display);font-weight:300;font-size:var(--fs-card);line-height:1.2;
+  letter-spacing:-0.02em;text-wrap:pretty}
+.card-face-text.flip{transform-origin:50% 0%;animation:rcFlip var(--t-flip) var(--ease) backwards}
+.card-hint{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:#999999;margin-top:40px}
+
+/* Rating row. The four are NOT the same weight on purpose: Again and Hard
+   carry their state colour as an outline, Easy is the only filled one. */
+.rate-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:24px}
+.rate-btn{padding:20px 12px;background:transparent;border:1px solid var(--border);color:var(--ink);
+  border-radius:var(--r);cursor:pointer;text-align:left;
+  transition:background var(--t-hover),color var(--t-hover),border-color var(--t-hover)}
+.rate-name{font-size:16px;font-weight:600}
+.rate-iv{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;margin-top:8px;color:var(--ink-2)}
+.rate-again{border-color:var(--error);color:var(--error)}
+.rate-again:hover{background:var(--error);color:#fff}
+.rate-hard{border-color:var(--warning);color:var(--warning)}
+.rate-hard:hover{background:var(--warning);color:#fff}
+.rate-good:hover{border-color:var(--ink);background:var(--surface-1)}
+.rate-easy{background:var(--success);border-color:var(--success);color:#fff}
+.rate-easy:hover{background:var(--ink);border-color:var(--ink)}
+.rate-again .rate-iv,.rate-hard .rate-iv,.rate-easy .rate-iv{color:inherit;opacity:0.75}
+
+.btn-wide{width:100%;margin-top:24px;padding:16px;background:var(--ink);color:var(--on-inverse);
+  border:none;border-radius:var(--r);font-size:16px;font-weight:600;cursor:pointer;
+  transition:background var(--t-hover),transform 90ms var(--ease)}
+.btn-wide:hover{background:var(--inverse-surface)}
+.btn-wide:active{transform:translateY(1px)}
+
+/* ── Narrow viewports: the rail becomes a top strip. ── */
+/* ── Narrow windows ───────────────────────────────────────────
+   Recall v6.html contains ZERO media queries. An earlier pass here
+   invented one that turned the rail into a horizontal strip across
+   the top — which is the one thing the design is emphatic about not
+   being. Reproduced at 800px: the rail measured 800x121 at y=0.
+
+   The design's own answer to "not enough width" is the collapsed
+   72px rail, so that is what a narrow window gets. The rules below
+   repeat .rail.collapsed rather than sharing a selector with it,
+   because CSS cannot say "this class OR this media" in one place and
+   a JS resize listener would be a second source of truth for a state
+   the toggle already owns. The toggle is hidden here: there is
+   nothing left to collapse. */
+@media (max-width:900px){
+  .rail{flex-basis:var(--rail-w-min);width:var(--rail-w-min)}
+  .rail .rail-head{flex-direction:column;align-items:center;gap:12px;padding:20px 0 14px}
+  .rail .rail-brand{justify-content:center;width:100%}
+  .rail .rail-brand svg{width:32px;height:32px}
+  .rail .rail-wordmark{display:none}
+  .rail .rail-group{height:1px;background:var(--border);margin:10px 20px;padding:0;
+    overflow:hidden;text-indent:-999em}
+  .rail .rail-item{gap:0;padding:11px 0;justify-content:center;position:relative}
+  .rail .rail-label{display:none}
+  .rail .rail-badge{position:absolute;top:9px;right:14px;width:5px;height:5px;
+    border-radius:var(--r-full);background:var(--warning);margin:0;text-indent:-999em;overflow:hidden}
+  .rail .rail-item.active .rail-badge{background:var(--on-inverse)}
+  .rail-toggle{display:none}
+  .rail-foot{padding:16px 8px}
+  .rail-user{justify-content:center}
+  .rail-user-meta{display:none}
+
+  /* Content reflow. Not in the design either — the design was drawn at one
+     width — but without it the 122px numeral and the 4-up rating row overflow
+     rather than merely look cramped. Flagged for Diogo. */
+  .col,.topbar-inner{padding-left:24px;padding-right:24px}
+  #screen-home .dashA-top{flex-direction:column}
+  #screen-home .stats-panel{border-left:none;border-top:1px solid rgba(240,240,238,0.12)}
+  :root{--fs-display:40px;--fs-hero:82px;--fs-streak:56px;--fs-card:28px}
+  .card-face,.listen-player{padding:32px}
+  .rate-grid{grid-template-columns:repeat(2,1fr)}
+  .upnext-row{grid-template-columns:24px 1fr;gap:12px}
+  .upnext-tag,.upnext-due{display:none}
+  .cal-week-row{grid-template-columns:32px minmax(0,1fr) 90px;gap:12px}
+  .cal-week-ticks{display:none}
+  .listen-row{grid-template-columns:32px minmax(0,1fr);gap:12px}
+  .listen-row-meta{display:none}
+}
+
+/* ── Today, second pass (after looking at it rendered) ────────── */
+/* The date reads as a caption under the greeting, not a label above it. */
+#screen-home .dash-header > div:first-child{display:flex;flex-direction:column}
+#screen-home .dash-date{order:2;margin-top:14px}
+/* v6's Today carries no header buttons: the actions live in the hero, and
+   "Generate"/"Your decks" are now 07 and 06 in the sidebar. Two routes to the
+   same place, one of them off-design, is just clutter. */
+#screen-home .dash-header > div:last-child{display:none !important}
+
+/* The heatmap goes monochrome with the rest of the app — density by ink
+   opacity. It was the last green thing on the page. */
+.hm-cell{border-radius:0;width:12px;height:12px}
+.hm-0{background:#E2E2DF}
+.hm-1{background:#C9C9C4}
+.hm-2{background:#999999}
+.hm-3{background:#4A4A47}
+.hm-4{background:#0F0F0F}
+.activity-panel{background:transparent;border:none;border-radius:0;padding:0;margin-top:64px}
+.activity-header h2{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase}
+.cal-legend{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:var(--ink-2)}
+/* The backup line, quieted — asked for 2026-09-02.
+   It was a white bordered box with two full-size buttons directly under the
+   greeting, and on this screen it read louder than the greeting itself.
+
+   WHAT IS NOT ALLOWED HERE, and why it is written down: it must not collapse,
+   and it must not disappear when things look fine. syncStatus() returns
+   show:true even in the healthy case ON PURPOSE (app.js) — after the
+   file:// -> github.io move the stored address was gone, backups were off, and
+   the app said nothing at all for two days. Invisible-off is indistinguishable
+   from working. So this section changes WEIGHT only, never presence.
+
+   Off/failed and healthy must still LOOK different, or the fix above is undone
+   in a new costume. In a monochrome design the axis for that is ink, not colour:
+   warn is full --ink, healthy stays --ink-3. Same silence, different voice.
+
+   :not(.danger) is load-bearing, exactly as it is in the .home-focus rule above.
+   .danger is the unreadable-save state from #19 — the one that means data is at
+   risk right now. Quieting a nudge is a design choice. Quieting THAT is how a
+   deck died in July. */
+.backup-nudge{border-radius:0}
+.backup-nudge:not(.danger){background:transparent;border-color:transparent;
+  border-width:0;padding:0;margin-bottom:28px;font-size:13px;
+  /* Rows stack; the flex lives one level down now, inside each row. .danger keeps
+     the base flex — it has one message and one button and never needed rows. */
+  display:block}
+
+/* Message on the left, its actions on the far right — the same rail for every row,
+   so two warnings read as one block instead of a scatter. `gap` is generous on the
+   cross axis because when the window is narrow enough to wrap, the actions dropping
+   under their OWN message must still look like they belong to it. */
+.backup-row{display:flex;justify-content:space-between;align-items:baseline;
+  gap:6px 32px;flex-wrap:wrap}
+.backup-row + .backup-row{margin-top:11px}
+.backup-row-text{flex:1;min-width:240px}
+.backup-row-actions{display:flex;align-items:baseline;gap:20px;
+  flex-shrink:0;margin-left:auto}
+.backup-nudge.warn:not(.danger){color:var(--ink)}
+.backup-nudge.quiet:not(.danger){color:var(--ink-3);font-size:12.5px}
+
+/* The actions become label-weight text, in the mono register the rest of v6 uses
+   for small controls. Underlined rather than boxed: without the box the underline
+   is the only thing left saying "this is clickable". --ink-2 (#666 on #F0F0EE,
+   5.3:1) clears AA; --ink-3 would not, which is why it is not used here.
+   The .btn:focus-visible outline is untouched and still applies. */
+.backup-nudge:not(.danger) .btn{background:transparent;border:none;border-radius:0;
+  padding:3px 0;font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2);
+  text-decoration:underline;text-underline-offset:3px;
+  transition:color var(--t-hover)}
+.backup-nudge:not(.danger) .btn:hover{background:transparent;color:var(--ink)}
+
+/* ============================================================
+   02 REVIEW — applied to the existing review markup
+   ============================================================ */
+#screen-review .review-wrap,#screen-quiz .quiz-wrap,#screen-cram .review-wrap{max-width:none}
+
+/* Mode row. Flip / Quiz / Cram are three screens in this app and one tab row
+   in the design; Timed is in the design and has never been built. */
+.mode-tabs{display:flex;gap:4px;padding:4px;border:1px solid var(--border);border-radius:var(--r);margin-bottom:24px}
+.mode-tab{flex:1;padding:12px;background:transparent;color:var(--ink-2);border:none;border-radius:var(--r-sm);
+  cursor:pointer;font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;transition:background var(--t-hover),color var(--t-hover)}
+.mode-tab:hover:not(:disabled){background:var(--surface-1);color:var(--ink)}
+.mode-tab.active{background:var(--ink);color:var(--on-inverse)}
+.mode-tab:disabled{opacity:0.38;cursor:not-allowed}
+
+.review-head{align-items:baseline;margin-bottom:12px}
+.review-deck{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2)}
+.review-pos{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);color:var(--ink)}
+
+/* Session progress is a tick row, not a bar — same primitive as the streak. */
+.progress{height:auto;background:transparent;border-radius:0;overflow:visible;margin-bottom:48px;
+  display:flex;gap:3px}
+.progress .tick{height:6px}
+.progress-fill{display:none}
+
+.flashcard{border-radius:var(--r);box-shadow:none;min-height:340px;padding:64px;
+  align-items:stretch;justify-content:flex-start;text-align:left;
+  transition:border-color var(--t-hover)}
+.flashcard:hover{box-shadow:none;border-color:var(--ink)}
+.face-label{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:var(--ink-2);margin-bottom:40px}
+.face-text{flex:1;display:flex;align-items:center;font-family:var(--font-display);font-weight:300;
+  font-size:var(--fs-card);line-height:1.2;letter-spacing:-0.02em;text-wrap:pretty}
+.face-text.flip{transform-origin:50% 0%;animation:rcFlip var(--t-flip) var(--ease) backwards}
+.flip-hint{margin-top:40px;font-family:var(--font-mono);font-size:11px;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;color:#999999}
+.card-speak{top:56px;right:56px}
+
+.show-answer-row{margin-top:24px;display:block}
+.show-answer-row .btn{width:100%;padding:16px;font-size:16px;font-weight:600;border-radius:var(--r);
+  transition:background var(--t-hover),transform 90ms var(--ease)}
+.show-answer-row .btn:active{transform:translateY(1px)}
+
+/* The four ratings are NOT equal weight: Again and Hard carry their state colour
+   as an outline, Easy is the only filled one, Good is the quiet default. */
+.rating-grid{gap:12px;margin-top:24px}
+.rating-btn{padding:20px 12px;border-radius:var(--r);align-items:flex-start;text-align:left;
+  gap:8px;font-size:16px;font-weight:600;background:transparent;
+  transition:background var(--t-hover),color var(--t-hover),border-color var(--t-hover)}
+.rating-btn .interval{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;opacity:1;color:var(--ink-2)}
+.rating-again{border-color:var(--error);color:var(--error)}
+.rating-again:hover{background:var(--error);color:#fff}
+.rating-hard{border-color:var(--warning);color:var(--warning)}
+.rating-hard:hover{background:var(--warning);color:#fff}
+.rating-good{border-color:var(--border);color:var(--ink)}
+.rating-good:hover{border-color:var(--ink);background:var(--surface-1)}
+.rating-easy{background:var(--success);border-color:var(--success);color:#fff}
+.rating-easy:hover{background:var(--ink);border-color:var(--ink)}
+.rating-again .interval,.rating-hard .interval,.rating-easy .interval{color:inherit;opacity:0.75}
+
+/* The pomodoro sits in the review header row; keep it mono and quiet. */
+.pomodoro-slot{margin-left:auto;margin-right:20px}
+
+/* The design prints the keyboard number on each rating: "1 · <1 min". The
+   shortcut exists either way; printing it is how anyone finds out. Done in CSS
+   so the interval text itself stays exactly what previewLabel() returned. */
+.rating-again .interval::before{content:'1 · '}
+.rating-hard  .interval::before{content:'2 · '}
+.rating-good  .interval::before{content:'3 · '}
+.rating-easy  .interval::before{content:'4 · '}
+
+/* Collapsed rail: the wordmark has to go, or it overflows the 72px rail and
+   spills over the content. Caught by looking at it, not by a check. */
+.rail.collapsed .rail-wordmark{display:none}
+.rail.collapsed .rail-brand{justify-content:center;width:100%}
+
+/* The hero sub line exists only in the nothing-due state (Diogo, 2026-08-30).
+   [hidden] needs the explicit rule because .due-sub sets display. */
+#screen-home .due-sub[hidden]{display:none}
+
+/* ============================================================
+   04 LISTEN  — values copied literally from Recall v6.html
+   ============================================================ */
+/* Shared page furniture the design repeats on every screen. */
+.v6-h1{font-family:var(--font-display);font-weight:200;font-size:62px;letter-spacing:-0.03em;
+  line-height:1;margin-bottom:24px}
+.v6-lede{color:#666666;font-size:16px;line-height:1.6;max-width:560px;margin-bottom:64px}
+.v6-lede-wide{max-width:none;margin-bottom:64px}
+
+.listen-player{background:#0F0F0F;color:#F0F0EE;padding:48px;margin-bottom:24px}
+.listen-player-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:32px}
+.listen-deck,.listen-pos{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:0.14em;text-transform:uppercase;color:rgba(240,240,238,0.65)}
+.listen-face-label{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;color:rgba(240,240,238,0.65);margin-bottom:16px}
+.listen-face{font-family:var(--font-display);font-weight:300;font-size:40px;line-height:1.2;
+  letter-spacing:-0.02em;text-wrap:pretty;min-height:96px}
+.listen-ticks{margin:40px 0 32px}
+.listen-ticks .tick{height:6px;background:rgba(240,240,238,0.16)}
+.listen-ticks .tick.done{background:rgba(240,240,238,0.45)}
+.listen-ticks .tick.cur{background:#F0F0EE}
+.listen-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.listen-btn-ghost{padding:14px 24px;background:transparent;color:#F0F0EE;
+  border:1px solid rgba(240,240,238,0.24);border-radius:4px;cursor:pointer;
+  font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;transition:border-color 160ms}
+.listen-btn-ghost:hover{border-color:#F0F0EE}
+.listen-btn-play{padding:14px 40px;background:#F0F0EE;color:#0A0A0A;border:none;border-radius:4px;
+  cursor:pointer;font-size:16px;font-weight:600;
+  transition:background 160ms,transform 90ms cubic-bezier(0.16,1,0.3,1)}
+.listen-btn-play:hover{background:#fff}
+.listen-btn-play:active{transform:translateY(1px)}
+
+/* Preference row — label left, control right, hairline between. Reused by Settings. */
+.pref-row{display:flex;align-items:center;gap:32px;padding:24px 8px;
+  border-bottom:1px solid #DDDDD8;flex-wrap:wrap}
+.pref-copy{flex:1;min-width:200px}
+.pref-title{font-size:16px;font-weight:500}
+.pref-desc{font-size:13px;color:#666666;margin-top:4px}
+
+/* Segmented control — the same shape as the mode tabs, at label scale. */
+.seg{display:flex;gap:4px;padding:4px;border:1px solid #DDDDD8;border-radius:4px}
+.seg-btn{padding:8px 16px;border:none;border-radius:2px;background:transparent;color:#666666;
+  cursor:pointer;font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;transition:background 160ms,color 160ms}
+.seg-btn:hover:not(.active){background:#E8E8E6;color:#0A0A0A}
+.seg-btn.active{background:#0A0A0A;color:#F0F0EE}
+
+.switch{width:48px;height:26px;border-radius:9999px;background:#DDDDD8;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:flex-start;padding:3px;flex-shrink:0;
+  transition:background 160ms}
+.switch[aria-checked="true"]{background:#0A0A0A;justify-content:flex-end}
+.switch-knob{width:20px;height:20px;border-radius:9999px;background:#F0F0EE;display:block}
+
+.listen-queue-head{margin-top:64px}
+.listen-row{display:grid;grid-template-columns:32px minmax(0,1fr) 160px;gap:24px;align-items:center;
+  padding:18px 16px;border:none;border-bottom:1px solid #DDDDD8;cursor:pointer;width:100%;
+  text-align:left;background:transparent;transition:background 160ms}
+.listen-row:hover{background:#E8E8E6}
+.listen-row.now{background:#0F0F0F;color:#F0F0EE}
+.listen-row.now:hover{background:#0F0F0F}
+.listen-row-idx{font-family:var(--font-mono);font-size:11px;font-weight:500;color:#666666}
+.listen-row.now .listen-row-idx{color:#F0F0EE}
+.listen-row-q{font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.listen-row.now .listen-row-q{font-weight:500}
+.listen-row-meta{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;color:#666666;text-align:right}
+.listen-row.now .listen-row-meta{color:rgba(240,240,238,0.65)}
+
+/* ============================================================
+   05 CALENDAR — values copied literally from Recall v6.html
+   Two DIFFERENT ramps live on this screen and are NOT unified:
+   the month cells use #F0F0EE→#0F0F0F, the 17-week activity
+   strip uses #E2E2DF→#0F0F0F. Both are in the design as written.
+   ============================================================ */
+.cal-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
+  margin-bottom:12px;flex-wrap:wrap}
+.cal-month-label{margin-bottom:0}
+.cal-tabs{flex-shrink:0}
+
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#DDDDD8;
+  border:1px solid #DDDDD8;margin-bottom:80px}
+.cal-wd{background:#F0F0EE;padding:10px;font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:0.14em;text-transform:uppercase;color:#666666;text-align:center}
+.cal-cell-blank{background:#E8E8E6;min-height:76px}
+.cal-cell{min-height:76px;padding:10px;display:flex;flex-direction:column;justify-content:space-between}
+.cal-cell-top{display:flex;align-items:center;justify-content:space-between}
+.cal-day{font-family:var(--font-mono);font-size:11px;font-weight:500}
+.cal-today-dot{width:6px;height:6px;border-radius:9999px}
+.cal-due{display:flex;align-items:center;gap:6px}
+.cal-due-bar{height:3px;background:#9A6700}
+.cal-due-n{font-family:var(--font-mono);font-size:11px;color:#9A6700}
+
+.cal-week-head{display:flex;align-items:baseline;justify-content:space-between;
+  border-bottom:1px solid #0A0A0A;padding-bottom:12px}
+.cal-week-title{border-bottom:none;padding-bottom:0}
+.cal-week-total{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;color:#666666}
+.cal-week-row{display:grid;grid-template-columns:40px minmax(0,1fr) 160px 90px;gap:24px;
+  align-items:center;padding:20px 16px;border-bottom:1px solid #DDDDD8}
+.cal-week-row.today{background:#0F0F0F;color:#F0F0EE}
+.cal-week-day{font-family:var(--font-mono);font-size:13px;font-weight:500;color:#666666}
+.cal-week-row.today .cal-week-day{color:#F0F0EE}
+.cal-week-name{font-family:var(--font-display);font-weight:400;font-size:20px}
+.cal-week-sub{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;color:#666666;margin-top:4px}
+.cal-week-row.today .cal-week-sub{color:rgba(240,240,238,0.65)}
+.cal-week-ticks{display:flex;gap:2px}
+.cal-week-ticks .tick{height:12px}
+.cal-week-row.today .cal-week-ticks .tick{background:rgba(240,240,238,0.16)}
+.cal-week-row.today .cal-week-ticks .tick.on{background:#F0F0EE}
+.cal-week-due{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;color:#9A6700;text-align:right}
+
+.cal-activity-head{display:flex;align-items:baseline;justify-content:space-between;
+  border-bottom:1px solid #0A0A0A;padding-bottom:12px;margin-bottom:32px;margin-top:80px}
+.cal-legend-v6{display:flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:11px;
+  letter-spacing:0.14em;text-transform:uppercase;color:#666666}
+.cal-legend-v6 .cal-legend-swatches{display:flex;gap:3px}
+#cal-activity{display:grid;grid-template-rows:repeat(7,14px);grid-auto-flow:column;
+  grid-auto-columns:14px;gap:3px;overflow-x:auto}
+#cal-activity .hm-cell{width:14px;height:14px}
+.hm-empty{background:transparent}
+
+/* ============================================================
+   The quiet outlined control, straight from Recall v6.html.
+   The design uses this one shape for every secondary action —
+   "Speak", "Study all", "Turn into cards" — so it is defined
+   once here instead of being re-specified per screen.
+   ============================================================ */
+.btn-quiet{padding:8px 14px;background:transparent;border:1px solid #DDDDD8;border-radius:4px;
+  cursor:pointer;font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;color:#666666;white-space:nowrap;
+  transition:border-color 160ms,color 160ms}
+.btn-quiet:hover{border-color:#0A0A0A;color:#0A0A0A}
+.btn-quiet:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+/* Read-aloud. Was a 🔊 in a grey box — an emoji is the one thing a monochrome
+   palette cannot absorb, because it arrives with its own colours. The design
+   names this control in words. */
+.speak-btn{background:transparent;border:1px solid #DDDDD8;border-radius:4px;color:#666666;
+  font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.14em;
+  text-transform:uppercase;line-height:1;padding:8px 14px;
+  transition:border-color 160ms,color 160ms}
+.speak-btn:hover{background:transparent;border-color:#0A0A0A;color:#0A0A0A}
+.speak-btn:active{transform:none}
+
+/* The missing-audio notice. Was a rounded grey pill with an emoji — the two
+   things this design system does not have. Now the same hairline band as every
+   other row: mono label left, quiet control right, 1px rules, no fill, no radius. */
+.audio-nudge{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  margin:0 0 32px;padding:16px 8px;background:transparent;border-radius:0;
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.audio-nudge-copy{flex:1;min-width:200px}
+.audio-nudge-title{font-size:16px;font-weight:500}
+.audio-nudge-desc{font-size:13px;color:var(--ink-2);margin-top:4px;line-height:1.6;max-width:62ch}
+
+/* ============================================================
+   03 EXAM — values copied literally from Recall v6.html
+   ------------------------------------------------------------
+   RESTYLE, not restructure. The design's Exam is a closed sitting
+   over due cards with count/time tabs; this app's Exam Mode (#36)
+   builds a mock Exame Nacional from a real IAVE Informação-Prova,
+   marks out of 200, and can pause. The app's is the richer
+   feature, so its markup and its three checks stay as they are —
+   what changes is the type, the surfaces and the colour.
+   ============================================================ */
+#screen-exam-setup h1.page,
+#screen-exam-result h1.page{font-family:var(--font-display);font-weight:200;font-size:var(--fs-display);
+  letter-spacing:var(--ls-display);line-height:1;margin-bottom:24px}
+#screen-exam-setup .page-head,#screen-exam-result .page-head{display:block;margin-bottom:0;border:none;padding:0}
+#screen-exam-setup .eyebrow,#screen-exam-result .eyebrow{font-family:var(--font-mono);font-size:11px;
+  font-weight:500;letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2);margin-bottom:12px}
+.exam-lede{max-width:560px;font-size:16px;line-height:1.6;color:#666666;margin-bottom:64px}
+.exam-lede strong{color:#0A0A0A;font-weight:500}
+
+/* The setup panel loses its box: hairlines, like every other row in the design. */
+#screen-exam-setup .panel.exam-panel{background:transparent;border:none;border-radius:0;
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:24px 8px}
+.exam-generate-row{display:flex;align-items:center;justify-content:space-between;gap:24px;
+  flex-wrap:wrap;margin-top:64px;padding:24px 8px;border-bottom:1px solid var(--border)}
+
+/* ── Running: the header the design draws — mono locator left, a big mono
+   clock that turns red when time is short. ── */
+.exam-bar{background:rgba(240,240,238,0.88);backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);border:none;border-bottom:1px solid var(--border);
+  border-radius:0;padding:16px 8px;top:var(--header-h)}
+.exam-bar-title{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2)}
+.exam-clock{font-family:var(--font-mono);font-size:25px;font-weight:500;letter-spacing:0}
+.exam-clock.over{color:#D1242F}
+.exam-clock-mode{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2)}
+.exam-progress{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2)}
+
+/* ── Questions ── */
+.exam-group-head{border-bottom:1px solid #0A0A0A;padding-bottom:12px}
+.exam-group-title{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase}
+.exam-group-points{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2)}
+.exam-item{background:#fff;border:1px solid #DDDDD8;border-radius:4px;padding:32px 40px}
+.exam-item-n{font-family:var(--font-mono);font-size:11px;font-weight:500;color:#666666}
+.exam-item-prompt{font-family:var(--font-display);font-weight:300;font-size:25px;line-height:1.25;
+  letter-spacing:-0.02em;text-wrap:pretty}
+.exam-item-points{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2)}
+
+/* Options: the design's row — key in mono, text at 16px, the picked one goes
+   full ink-deep rather than merely tinted. */
+.exam-options{gap:8px;margin-left:0}
+.exam-option{align-items:flex-start;gap:16px;padding:20px;background:#fff;
+  border:1px solid #DDDDD8;border-radius:4px;
+  transition:border-color 160ms,background 160ms}
+.exam-option:hover{background:#E8E8E6;border-color:#0A0A0A}
+.exam-option span{font-size:16px;line-height:1.5}
+.exam-option:has(input:checked){background:#0F0F0F;border-color:#0F0F0F;color:#F0F0EE}
+.exam-option:has(input:checked):hover{background:#0F0F0F}
+.exam-option input{accent-color:#F0F0EE}
+
+.exam-answer{border:1px solid #DDDDD8;border-radius:4px}
+.exam-foot{margin-top:32px}
+
+/* ── Report ── */
+.exam-disclaimer{background:transparent;border:none;border-radius:0;
+  border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+  padding:24px 8px;font-size:13px;line-height:1.6;color:var(--ink-2);margin-bottom:64px}
+.exam-disclaimer strong{color:#0A0A0A;font-weight:500}
+
+/* ── 03 Exam, second pass: the four v2 artefacts left after the first one.
+   Found by rendering the real exam and looking at it, not by reading CSS. ── */
+
+/* Cotações were a rounded grey pill. The design has no pills and no fills —
+   a cotação is a metric, and every metric here is bare mono. */
+.exam-item-points{background:transparent;border:none;border-radius:0;padding:0;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;font-weight:500}
+
+/* Overtime: a tinted red box becomes a hairline band that carries its colour in
+   the rule and the text, the way "Again" does on the rating row. */
+.exam-overtime{background:transparent;border:none;border-radius:0;
+  border-top:1px solid #D1242F;border-bottom:1px solid #D1242F;
+  padding:16px 8px;margin-bottom:24px;font-size:13px;line-height:1.6;
+  color:#D1242F;font-weight:400}
+.exam-material-warning{background:transparent;border:none;border-radius:0;
+  border-top:1px solid #9A6700;border-bottom:1px solid #9A6700;
+  padding:16px 8px;font-size:13px;line-height:1.6;color:#9A6700}
+
+/* Open answers: a filled grey box becomes paper with one hairline, matching the
+   inputs the design draws on the sign-in screen. */
+.exam-answer{margin-left:0}
+.exam-answer textarea,.exam-answer input[type=text]{background:#fff;border:1px solid #DDDDD8;
+  border-radius:4px;font-size:16px;line-height:1.6;padding:16px;
+  transition:border-color 160ms}
+.exam-answer textarea:focus,.exam-answer input[type=text]:focus{border-color:#0A0A0A;box-shadow:none}
+.exam-pause-note{font-family:var(--font-mono);font-size:11px;letter-spacing:var(--ls-mono);
+  text-transform:uppercase;line-height:1.6;color:var(--ink-2);max-width:none;margin-bottom:32px}
+
+/* The bar's controls are secondary actions — the design's quiet outlined shape. */
+.exam-bar-actions .btn-outline{background:transparent;border:1px solid #DDDDD8;border-radius:4px;
+  padding:8px 14px;font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:#666666;
+  transition:border-color 160ms,color 160ms}
+.exam-bar-actions .btn-outline:hover{border-color:#0A0A0A;color:#0A0A0A;background:transparent}
+
+/* ── 03 Exam report, second pass. Same two artefacts as the paper: tinted
+   rounded chips, and a filled box for the answer. The design carries a mark's
+   verdict in the TEXT colour and nothing else — see "Every question", where
+   right is #1A7F37 and wrong is #D1242F on bare paper. ── */
+.exam-mark{border-radius:4px;padding:32px 40px;margin-bottom:12px}
+.exam-mark-score{background:transparent;border:none;border-radius:0;padding:0;
+  font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2)}
+.exam-mark-score.full{background:transparent;border:none;color:#1A7F37}
+.exam-mark-score.zero{background:transparent;border:none;color:#D1242F}
+.exam-mark-how{font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:var(--ls-mono);text-transform:uppercase;color:var(--ink-2);margin-bottom:12px}
+/* The quoted answer keeps a rule to mark it as quoted, but loses the fill and
+   the half-rounded corners. */
+.exam-mark-yours{background:transparent;border-left:2px solid #0A0A0A;border-radius:0;
+  padding:4px 0 4px 16px;font-size:16px;line-height:1.5}
+.exam-mark-yours.blank{color:#999999}
+.exam-mark-comment{font-size:13px;line-height:1.6;color:var(--ink-2)}

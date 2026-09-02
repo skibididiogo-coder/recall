@@ -30,35 +30,61 @@
 <body>
 
 
-<nav class="app-nav">
-  <div class="nav-inner">
-    <button class="nav-logo" onclick="goHome()" aria-label="Recall home">
-      <span class="nav-logo-mark">R</span>
-      <span class="nav-logo-name">Recall</span>
+<div class="shell">
+
+<!-- ============ SIDEBAR (v6) ============
+     13 items in 5 groups, each with a zero-padded index. Replaces the 5-tab top
+     nav: the app had outgrown it, and 4 of the design's screens had no tab at all.
+     The list is DATA (NAV_DEF in app.js), not markup — the indices renumber
+     themselves, which is the whole point of numbering them. -->
+<aside class="rail" id="rail">
+  <div class="rail-head">
+    <button class="rail-brand" onclick="goHome()" aria-label="Recall home">
+      <!-- "Aperture": a square with a circular void and a small square returned to
+           the centre. One fill, no background box — the void shows what is behind
+           it, so the mark inverts correctly on paper and on ink. -->
+      <svg viewBox="0 0 64 64" role="img" aria-label="Recall">
+        <path fill-rule="evenodd" d="M0 0 H64 V64 H0 Z M32 17 A15 15 0 1 0 32 47 A15 15 0 1 0 32 17 Z"/>
+        <rect x="26" y="26" width="12" height="12"/>
+      </svg>
+      <span class="rail-wordmark">Recall</span>
     </button>
-    <div class="nav-tabs">
-      <button class="nav-tab" id="tab-home" onclick="goHome()">Home</button>
-      <button class="nav-tab" id="tab-decks" onclick="goDecks()">Decks</button>
-      <button class="nav-tab" id="tab-generate" onclick="goGenerate()">Generate</button>
-      <button class="nav-tab" id="tab-stats" onclick="goStats()">Progress</button>
-      <button class="nav-tab" id="tab-assignments" onclick="goAssignments()">Assignments</button>
-    </div>
-    <div class="nav-right">
-      <span class="nav-crumb" id="nav-crumb"></span>
-      <!-- The ⌘K pill exists so the shortcut is DISCOVERABLE. A keyboard-only feature
-           nobody is told about is a feature nobody uses. Clicking it does the same
-           thing as the shortcut. -->
-      <button class="search-pill" id="search-pill" onclick="openSearch()"
+    <button class="rail-toggle" id="rail-toggle" onclick="toggleRail()"
+            aria-label="Collapse sidebar" aria-expanded="true" title="Collapse">&laquo;</button>
+  </div>
+
+  <nav class="rail-nav" id="rail-nav" aria-label="Main"></nav>
+
+  <div class="rail-foot">
+    <div id="rail-pomodoro"></div>
+    <button class="rail-user" onclick="openKeyModal()" title="Settings" aria-label="Settings">
+      <span class="rail-avatar" id="rail-initials">D</span>
+      <span class="rail-user-meta">
+        <span class="rail-user-name" id="rail-user-name">Diogo</span>
+        <span class="m-label" id="rail-user-sub">Settings</span>
+      </span>
+    </button>
+  </div>
+</aside>
+
+<main>
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-where" id="topbar-where">01 / Today</div>
+      <div class="topbar-right">
+        <span class="topbar-offline" id="topbar-offline" hidden>Offline ready</span>
+        <span class="topbar-due" id="topbar-due"></span>
+        <span class="nav-crumb" id="nav-crumb"></span>
+        <button class="search-pill" id="search-pill" onclick="openSearch()"
               aria-label="Search everything" title="Search decks, cards and assignments">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
         <span>Search</span><kbd id="search-pill-key">⌘K</kbd>
       </button>
-      <button class="icon-btn" title="API key settings" onclick="openKeyModal()" aria-label="Settings">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      </button>
+      </div>
     </div>
   </div>
-</nav>
+
+  <div class="col">
 
 <!-- The update handoff (2026-08-01). NOT a toast: a toast disappears after 1.6s and
      has nothing to click, which is exactly the state that left ⌘Q as the only way to
@@ -73,7 +99,6 @@
   <button class="btn btn-ghost" onclick="dismissUpdateBar()" aria-label="Dismiss">Later</button>
 </div>
 
-<main>
   <!-- ============ DECKS HOME ============ -->
   <!-- ============ HOME (dashboard) ============
        Split from the decks library 2026-07-27: one screen was carrying eleven
@@ -111,7 +136,7 @@
           <div class="due-label">Due today</div>
           <div class="due-num">
             <span class="due-big" id="due-big">0</span>
-            <span class="due-unit">cards</span>
+            <span class="due-unit" id="due-unit">cards</span>
           </div>
           <p class="due-sub" id="due-sub"></p>
         </div>
@@ -121,7 +146,7 @@
         </div>
       </div>
       <div class="stats-panel" id="dash-stats-panel">
-        <div class="stats-panel-label">This week</div>
+        <div class="stats-panel-label">Streak</div>
         <div class="stats-list">
           <div class="stat-row"><span class="stat-n" id="dash-streak">0</span><span class="stat-l">Day streak</span></div>
           <div class="stat-divider"></div>
@@ -129,7 +154,15 @@
           <div class="stat-divider"></div>
           <div class="stat-row"><span class="stat-n" id="dash-week">0</span><span class="stat-l">Reviewed 7d</span></div>
         </div>
+        <div class="ticks streak-ticks" id="dash-streak-ticks" aria-hidden="true"></div>
       </div>
+    </div>
+
+    <!-- "Up next" (v6). The decks with cards due, in the design's four-column row.
+         Hidden entirely when nothing is due — an empty band under a zero is noise. -->
+    <div id="dash-upnext" hidden>
+      <div class="band-head">Up next</div>
+      <div id="dash-upnext-rows"></div>
     </div>
 
     <!-- Assignments panel (feature #27). Rendered OUTSIDE renderDashboard, which
@@ -188,6 +221,14 @@
 
   <!-- ============ ASSIGNMENTS (feature #27) ============ -->
   <section id="screen-assignments" class="screen">
+    <div class="cal-head">
+      <h1 class="v6-h1 cal-month-label">Assignments</h1>
+      <div class="seg cal-tabs" role="tablist" aria-label="Calendar view">
+          <button class="seg-btn" id="asg-tab-month" role="tab" onclick="goCalendar('Month')">Month</button>
+          <button class="seg-btn" id="asg-tab-week"  role="tab" onclick="goCalendar('Week')">Week</button>
+          <button class="seg-btn" id="asg-tab-asg"   role="tab" onclick="goAssignments()">Assignments</button>
+        </div>
+    </div>
     <div class="page-head">
       <div>
         <div class="eyebrow">School</div>
@@ -292,23 +333,36 @@
   <section id="screen-review" class="screen">
     <div id="review-active">
       <div class="review-wrap">
+        <!-- Mode row (v6). The design shows four modes as tabs on one screen; this
+             app has Flip, Quiz and Cram as three screens, so the tabs navigate.
+             Timed is in the design and has never been built — shown disabled
+             rather than dropped, because the row is the design and a silently
+             missing fourth tab reads as a rendering bug. -->
+        <div class="mode-tabs" role="tablist" aria-label="Review mode">
+          <button class="mode-tab" id="mode-flip"  role="tab" onclick="setReviewMode('Flip')">Flip</button>
+          <button class="mode-tab" id="mode-quiz"  role="tab" onclick="startQuiz()">Quiz</button>
+          <button class="mode-tab" id="mode-cram"  role="tab" onclick="startCram()">Cram</button>
+          <button class="mode-tab" id="mode-timed" role="tab" onclick="setReviewMode('Timed')">Timed</button>
+        </div>
+        <div class="mode-note" id="mode-note"></div>
         <div class="review-head">
           <span class="review-deck" id="review-deck-name">Deck</span>
           <!-- Pomodoro (feature #34). One timer shared by Study, Cram and Quiz. -->
           <div class="pomodoro-slot" role="group" aria-label="Focus timer"></div>
+          <span class="study-timer" id="review-timer" hidden></span>
           <span class="review-pos" id="review-pos">1 / 1</span>
         </div>
         <div class="progress"><div class="progress-fill" id="review-bar" style="width:0%"></div></div>
         <div class="flashcard" id="flashcard" onclick="flip()" role="button" tabindex="0"
              aria-label="Flashcard. Click or press space to reveal the answer.">
           <button class="speak-btn card-speak" title="Read aloud (S)" aria-label="Read this card aloud"
-                  onclick="event.stopPropagation(); speakReviewFace()">🔊</button>
+                  onclick="event.stopPropagation(); speakReviewFace()">Speak</button>
           <div class="face-label" id="face-label">Question</div>
           <div class="face-text" id="face-text">—</div>
-          <div class="flip-hint" id="flip-hint">click or press space to flip</div>
+          <div class="flip-hint" id="flip-hint">Space to reveal</div>
         </div>
         <div id="show-answer-row" class="show-answer-row">
-          <button class="btn btn-primary" onclick="flip()">Show answer</button>
+          <button class="btn btn-primary" onclick="flip()">Reveal answer</button>
         </div>
         <div id="rating-grid" class="rating-grid" style="display:none">
           <button class="rating-btn rating-again" onclick="rate('again')"><span>Again</span><span class="interval" id="iv-again">—</span></button>
@@ -411,13 +465,13 @@
         <div class="flashcard" onclick="cramFlip()" role="button" tabindex="0"
              aria-label="Flashcard. Click or press space to reveal the answer.">
           <button class="speak-btn card-speak" title="Read aloud (S)" aria-label="Read this card aloud"
-                  onclick="event.stopPropagation(); speakCramFace()">🔊</button>
+                  onclick="event.stopPropagation(); speakCramFace()">Speak</button>
           <div class="face-label" id="cram-face-label">Question</div>
           <div class="face-text" id="cram-face-text">—</div>
-          <div class="flip-hint" id="cram-flip-hint">click or press space to flip</div>
+          <div class="flip-hint" id="cram-flip-hint">Space to reveal</div>
         </div>
         <div id="cram-show-row" class="show-answer-row">
-          <button class="btn btn-primary" onclick="cramFlip()">Show answer</button>
+          <button class="btn btn-primary" onclick="cramFlip()">Reveal answer</button>
         </div>
         <div id="cram-grid" class="rating-grid cram-grid" style="display:none">
           <button class="rating-btn rating-again" onclick="onCramAnswer(false)"><span>Missed</span><span class="interval">comes back</span></button>
@@ -739,7 +793,93 @@
     </div>
     <div id="stats-body"></div>
   </section>
+
+  <!-- ============ 04 LISTEN (v6 design) ============
+       Hands-free review. The app already had Kokoro clips and speak(); what it
+       never had was a surface that plays them one after another. -->
+  <section id="screen-listen" class="screen">
+    <h1 class="v6-h1">Listen</h1>
+    <p class="v6-lede">Hands-free review. Recall reads each card aloud and moves through the deck on its own, so you can study while walking or cooking.</p>
+
+    <div class="listen-player">
+      <div class="listen-player-head">
+        <span class="listen-deck" id="listen-deck">—</span>
+        <span class="listen-pos" id="listen-pos">00 / 00</span>
+      </div>
+      <div class="listen-face-label" id="listen-face-label">Question</div>
+      <div class="listen-face" id="listen-face"></div>
+      <div class="ticks ticks-3 listen-ticks" id="listen-ticks"></div>
+      <div class="listen-controls">
+        <button class="listen-btn-ghost" onclick="listenPrev()">Previous</button>
+        <button class="listen-btn-play" id="listen-play" onclick="listenToggle()">Play</button>
+        <button class="listen-btn-ghost" onclick="listenNext()">Next</button>
+      </div>
+    </div>
+
+    <div class="pref-row">
+      <div class="pref-copy">
+        <div class="pref-title">Speed</div>
+        <div class="pref-desc">Playback rate for the voice</div>
+      </div>
+      <div class="seg" id="listen-rates"></div>
+    </div>
+    <div class="pref-row">
+      <div class="pref-copy">
+        <div class="pref-title">Read the answer too</div>
+        <div class="pref-desc">Off reads only questions, for self-testing out loud</div>
+      </div>
+      <button class="switch" id="listen-both" role="switch" aria-checked="true"
+              onclick="listenToggleBoth()"><span class="switch-knob"></span></button>
+    </div>
+
+    <div class="band-head listen-queue-head" id="listen-queue-head">Queue / 0 cards</div>
+    <div id="listen-queue"></div>
+  </section>
+
+  <!-- ============ 05 CALENDAR (v6 design) ============
+       Month and Week live here; Assignments is the third tab and stays its own
+       section so its modal, sort control and checks keep working unchanged. All
+       three report as "05 / Calendar", and Assignments has no nav row of its own.
+       NOTE the third tab is Diogo's instruction, not the prototype: the design's
+       Calendar has two tabs. -->
+  <section id="screen-calendar" class="screen">
+    <div class="cal-head">
+      <h1 class="v6-h1 cal-month-label" id="cal-month-label">&mdash;</h1>
+      <div class="seg cal-tabs" role="tablist" aria-label="Calendar view">
+          <button class="seg-btn" id="cal-tab-month" role="tab" onclick="setCalView('Month')">Month</button>
+          <button class="seg-btn" id="cal-tab-week"  role="tab" onclick="setCalView('Week')">Week</button>
+          <button class="seg-btn" id="cal-tab-asg"   role="tab" onclick="goAssignments()">Assignments</button>
+        </div>
+    </div>
+    <p class="v6-lede v6-lede-wide">Filled cells are days you studied. Amber bars show cards coming due.</p>
+
+    <div id="cal-month-pane">
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+
+    <div id="cal-week-pane" hidden>
+      <div class="cal-week-head">
+        <div class="band-head cal-week-title">This week</div>
+        <div class="cal-week-total" id="cal-week-total"></div>
+      </div>
+      <div id="cal-week-rows"></div>
+    </div>
+
+    <div class="cal-activity-head">
+      <div class="band-head cal-week-title" id="cal-activity-title">Activity / 17 weeks</div>
+      <div class="cal-legend-v6">
+        <span>Less</span>
+        <div class="cal-legend-swatches">
+          <span class="hm-cell hm-0"></span><span class="hm-cell hm-1"></span><span class="hm-cell hm-2"></span><span class="hm-cell hm-3"></span><span class="hm-cell hm-4"></span>
+        </div>
+        <span>More</span>
+      </div>
+    </div>
+    <div id="cal-activity"></div>
+  </section>
+  </div><!-- /.col -->
 </main>
+</div><!-- /.shell -->
 
 <!-- ============ NEW DECK MODAL ============ -->
 <div class="modal-backdrop" id="deck-modal" onclick="if(event.target===this)closeDeckModal()">

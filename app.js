@@ -532,15 +532,28 @@ function renderBackupNudge() {
   const anyWarning = (s.show && s.level !== 'fresh') || (sync.show && sync.level === 'warn');
   el.className = 'backup-nudge' + (anyWarning ? ' warn' : ' quiet');
 
+  /* One message, with its own actions, per row.
+     Two of these can be on screen at once — the local backup (#19) and the server
+     backup (#24) — and until 2026-09-02 they were emitted as FIVE FLAT SIBLINGS
+     into one wrapping flex: div, button, div, button, button. Nothing was wrong
+     with any single one of them; the container simply wrapped wherever the window
+     width fell, so the two messages and their buttons interleaved. It looked fine
+     in every screenshot taken with only ONE status showing, which is why it shipped.
+     Giving each status a row makes the left edges and the right edges line up at
+     any width, instead of at the widths someone happened to look at. */
+  const row = (text, actions) =>
+    `<div class="backup-row"><div class="backup-row-text">${escapeHtml(text)}</div>`
+    + `<div class="backup-row-actions">${actions}</div></div>`;
+
   let html = '';
   if (s.show) {
-    html += `<div>${escapeHtml(s.text)}</div>` + (s.level === 'fresh' ? ''
+    html += row(s.text, s.level === 'fresh' ? ''
       : `<button class="btn btn-outline btn-sm" onclick="exportData()">Back up now</button>`);
   }
   if (sync.show) {
-    html += `<div>${escapeHtml(sync.text)}</div>`
-          + `<button class="btn btn-outline btn-sm" onclick="onBackupToServer()">Back up to server</button>`
-          + `<button class="btn btn-outline btn-sm" onclick="openRestoreModal()">Restore</button>`;
+    html += row(sync.text,
+      `<button class="btn btn-outline btn-sm" onclick="onBackupToServer()">Back up to server</button>`
+      + `<button class="btn btn-outline btn-sm" onclick="openRestoreModal()">Restore</button>`);
   }
   el.innerHTML = html;
 }
@@ -2370,22 +2383,170 @@ function previewLabel(srs, rating) {
    3. SCREEN ROUTER
    ---------------------------------------------------------------- */
 
+/* ----------------------------------------------------------------
+   3B. SIDEBAR (v6 design handoff, 2026-08-30)
+   ----------------------------------------------------------------
+   The nav is DATA, not markup. The design numbers every item 01–13,
+   and hand-written indices in HTML go stale the first time an item
+   moves — so they are generated from position in this list.
+
+   `screens` is every screen id that should light this item up: the
+   app splits Review into review/quiz/cram and Exam into three
+   phases, which the design treats as one destination each.
+
+   `go: null` marks a screen the DESIGN specifies but the APP has
+   never built. Rendered dimmed and non-clickable rather than
+   omitted: the numbering is part of the design, and a link into an
+   empty room is worse than a visibly unfinished one. -------------- */
+const NAV_DEF = [
+  { group: 'Study' },
+  { key: 'home',     label: 'Today',        screens: ['home'],                             go: () => goHome() },
+  { key: 'review',   label: 'Review',       screens: ['review', 'quiz', 'cram'],           go: () => startDueReview() },
+  { key: 'exam',     label: 'Exam',         screens: ['exam-setup', 'exam', 'exam-result'], go: () => goExamForDeck() },
+  { key: 'listen',   label: 'Listen',       screens: ['listen'],                           go: () => goListen() },
+  // Points at Assignments: the design's Calendar (a month grid of review load) does
+  // not exist, and Assignments is the only date-shaped screen the app has. Flagged
+  // for Diogo at the first review checkpoint — rename it or build the real one.
+  { key: 'calendar', label: 'Calendar',     screens: ['calendar', 'assignments'],          go: () => goCalendar() },
+  { group: 'Material' },
+  { key: 'decks',    label: 'Decks',        screens: ['decks', 'deck'],                    go: () => goDecks() },
+  { key: 'create',   label: 'Create',       screens: ['generate'],                         go: () => goGenerate() },
+  { key: 'notes',    label: 'Notes',        screens: ['artifacts'],                        go: () => goArtifactsForDeck() },
+  { key: 'chat',     label: 'Chat',         screens: ['chat'],                             go: () => goChatForDeck() },
+  { group: 'Progress' },
+  { key: 'stats',    label: 'Stats',        screens: ['stats'],                            go: () => goStats() },
+  { key: 'sessions', label: 'Sessions',     screens: [],                                   go: null },
+  { key: 'badges',   label: 'Achievements', screens: [],                                   go: null },
+  { group: 'System' },
+  { key: 'settings', label: 'Settings',     screens: [],                                   go: () => openKeyModal() }
+];
+
+/* Flat list of just the destinations, in order — this is what the index
+   numbers count and what the directional screen animation compares against. */
+function navItems() { return NAV_DEF.filter(n => !n.group); }
+
+function navPosForScreen(screenId) {
+  return navItems().findIndex(n => n.screens.includes(screenId));
+}
+
+let railCollapsed = false;
+
+function renderRail() {
+  const host = document.getElementById('rail-nav');
+  if (!host) return;
+  let i = 0;
+  host.innerHTML = NAV_DEF.map(n => {
+    if (n.group) return `<div class="rail-group">${escapeHtml(n.group)}</div>`;
+    i += 1;
+    const idx = pad2(i);
+    const unbuilt = !n.go;
+    const title = unbuilt ? `${n.label} — not built yet` : n.label;
+    return `<button class="rail-item" id="rail-${n.key}" data-key="${n.key}"
+              ${unbuilt ? 'disabled aria-disabled="true"' : `onclick="onRailGo('${n.key}')"`}
+              title="${escapeHtml(title)}">
+              <span class="rail-idx">${idx}</span>
+              <span class="rail-label">${escapeHtml(n.label)}</span>
+              <span class="rail-badge" id="rail-badge-${n.key}" hidden></span>
+            </button>`;
+  }).join('');
+  renderRailBadge();
+}
+
+function onRailGo(key) {
+  const item = navItems().find(n => n.key === key);
+  if (item && item.go) item.go();
+}
+
+/* The due count rides on Review, in the rail and in the header. Both read the
+   same number from the same place, so they cannot disagree. */
+function dueCountAll() {
+  try {
+    return loadData().cards.filter(c => (c.srs?.due ?? 0) <= Date.now()).length;
+  } catch (e) { return 0; }
+}
+
+function renderRailBadge() {
+  const due = dueCountAll();
+  const b = document.getElementById('rail-badge-review');
+  if (b) { b.textContent = String(due); b.hidden = due === 0; }
+  const t = document.getElementById('topbar-due');
+  if (t) { t.textContent = due ? due + ' due' : ''; }
+}
+
+function toggleRail() {
+  railCollapsed = !railCollapsed;
+  const rail = document.getElementById('rail');
+  const btn  = document.getElementById('rail-toggle');
+  if (rail) rail.classList.toggle('collapsed', railCollapsed);
+  if (btn) {
+    btn.innerHTML = railCollapsed ? '&raquo;' : '&laquo;';
+    btn.setAttribute('aria-expanded', String(!railCollapsed));
+    btn.setAttribute('aria-label', railCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    btn.title = railCollapsed ? 'Expand' : 'Collapse';
+  }
+}
+
+/* ----------------------------------------------------------------
+   3C. ROUTING
+   ---------------------------------------------------------------- */
+
+let navPos = 0;   // where we are in the flat nav list, for the direction of travel
+
 function showScreen(id) {
   stopSpeech();   // leaving a screen always silences the card being read (feature #18)
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById('screen-' + id).classList.add('active');
+  stopTimedTicker();   // ...and never leaves a Timed clock running off-screen
+  listenPlaying = false;   // ...and never leaves the Listen queue chaining in the background
+
+  // Direction of travel: later in the sidebar enters from below, earlier from
+  // above. A screen with no nav slot (a deck detail, an exam report) keeps the
+  // previous position, so returning from it animates the way you came.
+  const target = navPosForScreen(id);
+  const goingUp = target >= 0 && target < navPos;
+  if (target >= 0) navPos = target;
+
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active', 'enter-up'));
+  const el = document.getElementById('screen-' + id);
+  el.classList.add('active');
+  if (goingUp) el.classList.add('enter-up');
+
   window.scrollTo(0, 0);
+  syncRail(id);
   // Pomodoro (feature #34). Hooked HERE rather than in startReview/startQuiz/startCram
   // because all three funnel through this function — one call instead of three that
   // could drift apart. The slots only exist on those screens, so this is a no-op
   // everywhere else, and a running timer is unaffected by navigating away.
   renderPomodoro();
 }
-function setCrumb(text) { document.getElementById('nav-crumb').textContent = text || ''; }
-function setActiveTab(tab) {
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-  if (tab) document.getElementById('tab-' + tab).classList.add('active');
+
+/* Rail highlight + the header's "07 / Create" locator, both derived from the
+   screen id so they can never drift from what is actually on screen. */
+function syncRail(id) {
+  const items = navItems();
+  const pos = navPosForScreen(id);
+  document.querySelectorAll('.rail-item').forEach(b => b.classList.remove('active'));
+  if (pos >= 0) {
+    const el = document.getElementById('rail-' + items[pos].key);
+    if (el) el.classList.add('active');
+  }
+  const where = document.getElementById('topbar-where');
+  if (where) {
+    where.textContent = pos >= 0
+      ? pad2(pos + 1) + ' / ' + items[pos].label
+      : (id.charAt(0).toUpperCase() + id.slice(1)).replace(/-/g, ' ');
+  }
+  renderRailBadge();
 }
+
+function setCrumb(text) {
+  const el = document.getElementById('nav-crumb');
+  if (el) el.textContent = text || '';
+}
+
+/* Kept as a no-op shim. The five top tabs it drove are gone, replaced by the
+   sidebar, which syncRail() drives off the screen id instead. Twenty-odd call
+   sites still call this; emptying it here beats editing all of them, and the
+   name still reads correctly at those call sites. */
+function setActiveTab(tab) { /* superseded by syncRail() */ }
 
 function escapeHtml(str) {
   return String(str)
@@ -2668,7 +2829,7 @@ function renderHome() {
 function renderDashboard(data) {
   const now = new Date();
   document.getElementById('dash-date').textContent =
-    now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+    now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
   document.getElementById('dash-greeting').textContent = greetingFor(now) + '.';
 
   const panels = document.getElementById('dash-panels');
@@ -2698,9 +2859,15 @@ function renderDashboard(data) {
   const decksWithDue = data.decks.filter(d => dueCount(d.id) > 0).length;
 
   document.getElementById('due-big').textContent = due;
-  document.getElementById('due-sub').textContent = due === 0
+  document.getElementById('due-unit').innerHTML = due === 0
+    ? 'cards'
+    : 'cards<br>~' + estimateMinutes(due) + ' min';
+  const sub = document.getElementById('due-sub');
+  const focus = currentHomeLayout() === 'focus';
+  sub.textContent = due === 0
     ? 'Nothing due right now. Cram a deck if you want extra practice.'
     : `Across ${decksWithDue} deck${decksWithDue === 1 ? '' : 's'} · about ${estimateMinutes(due)} minutes of review`;
+  sub.hidden = due !== 0 && !focus;
 
   const reviewBtn = document.getElementById('dash-review-btn');
   reviewBtn.disabled = due === 0;
@@ -2715,6 +2882,96 @@ function renderDashboard(data) {
   document.getElementById('dash-week').textContent = reviewsInLastDays(data.log, 7);
 
   document.getElementById('dash-heatmap').innerHTML = heatmapGridHtml(data.log);
+
+  // v6 additions: the streak as ticks, and the "Up next" band.
+  const streak = calculateStreak(data.log, normalizeGamification(data.gamification).frozenDays, Date.now());
+  renderStreakTicks(streak);
+  renderUpNext(data);
+  countUp('due-big', due);
+  renderRailBadge();
+}
+
+/* The tick row. 14 days, filled from the RIGHT so the rightmost tick is today —
+   a streak reads as "how far back does this run", not "how far along am I".
+   Each filled tick draws itself, staggered, so the row builds left to right. */
+function renderStreakTicks(streakDays) {
+  const host = document.getElementById('dash-streak-ticks');
+  if (!host) return;
+  const N = 14;
+  const lit = Math.min(streakDays, N);
+  host.innerHTML = Array.from({ length: N }, (_, i) => {
+    const on = i >= N - lit;
+    const delay = 60 + Math.min(i, 24) * 26;
+    return `<div class="tick${on ? ' on anim' : ''}"${on ? ` style="animation-delay:${delay}ms"` : ''}></div>`;
+  }).join('');
+}
+
+/* Decks with cards due, at most four — the design's row is a shortlist, not a
+   second copy of the library. Rows cascade in on the 32ms stagger. */
+function renderUpNext(data) {
+  const band = document.getElementById('dash-upnext');
+  const rows = document.getElementById('dash-upnext-rows');
+  if (!band || !rows) return;
+
+  const list = data.decks
+    .map(d => ({ deck: d, due: dueCount(d.id) }))
+    .filter(x => x.due > 0)
+    .sort((a, b) => b.due - a.due)
+    .slice(0, 4);
+
+  band.hidden = list.length === 0;
+  rows.innerHTML = list.map((x, i) => `
+    <button class="upnext-row rise" style="animation-delay:${70 + Math.min(i, 14) * 32}ms"
+            onclick="goDeck('${x.deck.id}')">
+      <span class="upnext-idx">${pad2(i + 1)}</span>
+      <span class="upnext-title">${escapeHtml(x.deck.name)}</span>
+      <span class="upnext-tag">${escapeHtml(x.deck.tag || '')}</span>
+      <span class="upnext-due">${x.due} due</span>
+    </button>`).join('');
+}
+
+/* Session ticks. Written into the .progress container the bar used to live in;
+   #review-bar itself stays in the DOM and is hidden by CSS, so nothing that
+   still reaches for it throws. */
+function renderProgressTicks(barId, pos, total) {
+  const bar = document.getElementById(barId);
+  if (!bar) return;
+  const host = bar.parentElement;
+  if (!host) return;
+  const cells = Array.from({ length: total }, (_, i) => {
+    const cls = i < pos ? 'tick on' : i === pos ? 'tick cur' : 'tick';
+    const delay = 60 + Math.min(i, 24) * 26;
+    return `<div class="${cls} anim" style="animation-delay:${delay}ms"></div>`;
+  }).join('');
+  host.innerHTML = cells + bar.outerHTML;
+}
+
+/* Restart the flip keyframe. Re-adding a class the element already carries does
+   nothing, so the animation has to be taken off and forced to reflow first. */
+function flipIn(el) {
+  if (!el) return;
+  el.classList.remove('flip');
+  void el.offsetWidth;
+  el.classList.add('flip');
+}
+
+/* Count-up on the large numerals. Reads the final value from the argument, not
+   from the DOM, and always lands exactly on it — an eased counter that stops at
+   119 of 120 is worse than no animation. Skipped under reduced-motion. */
+function countUp(id, target, ms = 720) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || target <= 0) { el.textContent = String(target); return; }
+  const t0 = performance.now();
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / ms);
+    const eased = 1 - Math.pow(1 - k, 3);
+    el.textContent = String(Math.round(target * eased));
+    if (k < 1) requestAnimationFrame(step);
+    else el.textContent = String(target);
+  };
+  requestAnimationFrame(step);
 }
 
 /* "Start review" from the dashboard: jump straight into the deck with the most
@@ -2778,8 +3035,12 @@ function renderAudioNudge(data) {
   const missing = cardClips(data).filter(e => !hasClip(e.h)).length;
   if (missing === 0) return '';
   return `<div class="audio-nudge">
-      <span>🔊 ${missing} card clip${missing === 1 ? '' : 's'} ${missing === 1 ? 'has' : 'have'} no audio yet</span>
-      <button class="btn btn-outline btn-sm" onclick="onPrepareAudio()">Prepare audio</button>
+      <div class="audio-nudge-copy">
+        <div class="audio-nudge-title">${missing} clip${missing === 1 ? '' : 's'} without audio</div>
+        <div class="audio-nudge-desc">Export the manifest, then run the Kokoro generator to render them. The banner clears once the clips exist.</div>
+      </div>
+      <button class="btn-quiet" onclick="onPrepareAudio()"
+              title="Writes recall-audio-manifest.json to your downloads">Export manifest</button>
     </div>`;
 }
 
@@ -2795,7 +3056,7 @@ function onPrepareAudio() {
     new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' }));
   toast(missing === 0
     ? 'Manifest saved — every clip already exists'
-    : missing + ' clip' + (missing === 1 ? '' : 's') + ' to generate — now run the generator script');
+    : 'Manifest saved — now run (C) kokoro-build-audio.py on it');
 }
 
 function renderTagRow(tags) {
@@ -3230,11 +3491,18 @@ function renderReview() {
   const total = reviewQueue.length;
 
   document.getElementById('review-pos').textContent = (reviewPos + 1) + ' / ' + total;
-  document.getElementById('review-bar').style.width = Math.round(reviewPos / total * 100) + '%';
+  // v6: session position is a tick row, the same primitive as the streak — done
+  // behind you in ink, the card you are on in amber, what is left in hairline.
+  renderProgressTicks('review-bar', reviewPos, total);
+  renderReviewMode();
+  paintTimer();
+  if (reviewMode === 'Timed' && !isFlipped) startTimedTicker(); else stopTimedTicker();
   document.getElementById('face-label').textContent = isFlipped ? 'Answer' : 'Question';
-  document.getElementById('face-text').textContent = isFlipped ? card.back : card.front;
+  const faceEl = document.getElementById('face-text');
+  faceEl.textContent = isFlipped ? card.back : card.front;
+  flipIn(faceEl);
   document.getElementById('flip-hint').style.display = isFlipped ? 'none' : 'block';
-  document.getElementById('show-answer-row').style.display = isFlipped ? 'none' : 'flex';
+  document.getElementById('show-answer-row').style.display = isFlipped ? 'none' : 'block';
   document.getElementById('rating-grid').style.display = isFlipped ? 'grid' : 'none';
 
   if (isFlipped) {
@@ -3245,6 +3513,307 @@ function renderReview() {
   }
 
   autoSpeakReview();
+}
+
+
+
+/* ----------------------------------------------------------------
+   05 CALENDAR (v6 design, screen 05)
+   ----------------------------------------------------------------
+   Month grid + week list, both off data that already exists: data.log
+   is { 'YYYY-MM-DD': reviewCount }, and future due counts come from
+   the cards' own srs.due. Nothing new is persisted.
+
+   The month palette and the 17-week activity ramp are DIFFERENT in
+   the design and are kept different here. ---------------------- */
+const CAL_MONTH_PALETTE = ['#F0F0EE', '#DDDDD8', '#C9C9C4', '#8C8C87', '#0F0F0F'];
+const CAL_WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const CAL_WEEK_TICKS = 12;          // the design draws twelve per day
+const CAL_TICK_REVIEWS = 2;         // ...so one tick reads as two reviews
+
+let calView = 'Month';
+
+function goCalendar(view) {
+  if (view) calView = view;
+  showScreen('calendar');
+  setCrumb('');
+  renderCalendar();
+}
+function setCalView(view) { calView = view; renderCalendar(); }
+
+/* Cards coming due, bucketed by day key. Only forward-looking: a card that
+   went overdue last week is due TODAY, not on the day it lapsed. */
+function dueByDay(cards, now) {
+  const out = {};
+  for (const c of cards) {
+    const due = c.srs?.due ?? 0;
+    const k = dayKey(Math.max(due, now));
+    out[k] = (out[k] || 0) + 1;
+  }
+  return out;
+}
+
+function renderCalendar() {
+  const data = loadData();
+  const now = Date.now();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const log = data.log || {};
+  const due = dueByDay(data.cards, now);
+
+  document.getElementById('cal-month-label').textContent =
+    today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  ['month', 'week', 'asg'].forEach(k => {
+    const on = (k === 'month' && calView === 'Month') || (k === 'week' && calView === 'Week');
+    ['cal-tab-' + k, 'asg-tab-' + k].forEach(id => {
+      const b = document.getElementById(id);
+      if (!b) return;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+  });
+  document.getElementById('cal-month-pane').hidden = calView !== 'Month';
+  document.getElementById('cal-week-pane').hidden = calView !== 'Week';
+
+  /* ── Month grid ── */
+  const y = today.getFullYear(), m = today.getMonth(), dToday = today.getDate();
+  const first = new Date(y, m, 1).getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  let cells = CAL_WEEKDAY_LABELS.map(w => `<div class="cal-wd">${w}</div>`).join('');
+  for (let i = 0; i < first; i++) cells += '<div class="cal-cell-blank"></div>';
+  for (let d = 1; d <= days; d++) {
+    const key = dayKey(new Date(y, m, d).getTime());
+    const n = log[key] || 0;
+    const lvl = n <= 0 ? 0 : n < 4 ? 1 : n < 8 ? 2 : n < 15 ? 3 : 4;
+    const fg = lvl >= 3 ? '#F0F0EE' : '#0A0A0A';
+    const dueN = d >= dToday ? (due[key] || 0) : 0;
+    cells += `<div class="cal-cell" style="background:${CAL_MONTH_PALETTE[lvl]}"
+        title="${key} · ${n} review${n === 1 ? '' : 's'}">
+        <div class="cal-cell-top">
+          <span class="cal-day" style="color:${fg}">${pad2(d)}</span>
+          ${d === dToday ? `<span class="cal-today-dot" style="background:${fg}"></span>` : ''}
+        </div>
+        ${dueN > 0 ? `<div class="cal-due">
+            <div class="cal-due-bar" style="width:${Math.min(100, dueN * 4)}%"></div>
+            <span class="cal-due-n">${dueN}</span>
+          </div>` : ''}
+      </div>`;
+  }
+  document.getElementById('cal-grid').innerHTML = cells;
+
+  /* ── Week list ── */
+  const sunday = new Date(today);
+  sunday.setDate(sunday.getDate() - sunday.getDay());
+  let weekTotal = 0, rows = '';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(sunday); d.setDate(d.getDate() + i);
+    const key = dayKey(d.getTime());
+    const n = log[key] || 0;
+    weekTotal += n;
+    const isToday = d.getTime() === today.getTime();
+    const dueN = due[key] || 0;
+    const lit = Math.min(CAL_WEEK_TICKS, Math.round(n / CAL_TICK_REVIEWS));
+    const ticks = Array.from({ length: CAL_WEEK_TICKS }, (_, k) =>
+      `<div class="tick${k < lit ? ' on' : ''}"></div>`).join('');
+    rows += `<div class="cal-week-row${isToday ? ' today' : ''}">
+        <span class="cal-week-day">${pad2(d.getDate())}</span>
+        <div>
+          <div class="cal-week-name">${d.toLocaleDateString('en-US', { weekday: 'long' })}</div>
+          <div class="cal-week-sub">${isToday ? 'Today · ' : ''}${estimateMinutes(n)} min</div>
+        </div>
+        <div class="cal-week-ticks">${ticks}</div>
+        ${dueN > 0 ? `<span class="cal-week-due">${dueN} due</span>` : '<span></span>'}
+      </div>`;
+  }
+  document.getElementById('cal-week-total').textContent = weekTotal + ' studied';
+  document.getElementById('cal-week-rows').innerHTML = rows;
+
+  /* ── Activity strip ── */
+  document.getElementById('cal-activity-title').textContent = 'Activity / ' + HEATMAP_WEEKS + ' weeks';
+  document.getElementById('cal-activity').innerHTML = heatmapCellsHtml(log);
+}
+
+/* ----------------------------------------------------------------
+   04 LISTEN (v6 design, screen 04)
+   ----------------------------------------------------------------
+   The clips and speak() already existed (feature #18); what was missing
+   was a surface that chains them. speak() sets the module-level
+   `currentAudio`, so chaining hangs an `ended` handler on that element
+   after the call rather than reaching into speak() itself.
+
+   Queue: cards due across the whole library, because "hands-free
+   review" is a review. With nothing due it falls back to the whole
+   library, so the screen is never a dead end. ------------------- */
+const LISTEN_RATES = ['0.75', '1', '1.25', '1.5'];
+
+let listenQueue = [];
+let listenIdx = 0;
+let listenPlaying = false;
+let listenFace = 'q';
+let listenRate = '1';
+let listenBoth = true;
+
+function buildListenQueue() {
+  const data = loadData();
+  const deckName = id => (data.decks.find(d => d.id === id) || {}).name || '';
+  const due = data.cards.filter(c => (c.srs?.due ?? 0) <= Date.now());
+  const pool = due.length ? due : data.cards;
+  return pool.map(c => ({ id: c.id, q: c.front, a: c.back, deckId: c.deckId, deck: deckName(c.deckId) }));
+}
+
+function goListen() {
+  listenQueue = buildListenQueue();
+  if (listenIdx >= listenQueue.length) listenIdx = 0;
+  listenStop();
+  showScreen('listen');
+  setCrumb('');
+  renderListen();
+}
+
+function renderListen() {
+  const total = listenQueue.length;
+  const card = listenQueue[listenIdx];
+
+  document.getElementById('listen-deck').textContent = card ? card.deck : '';
+  document.getElementById('listen-pos').textContent =
+    pad2(Math.min(listenIdx + 1, Math.max(1, total))) + ' / ' + pad2(total);
+  document.getElementById('listen-face-label').textContent = listenFace === 'a' ? 'Answer' : 'Question';
+  document.getElementById('listen-face').textContent = card ? (listenFace === 'a' ? card.a : card.q) : '';
+  document.getElementById('listen-play').textContent = listenPlaying ? 'Pause' : 'Play';
+
+  const n = Math.max(1, total);
+  document.getElementById('listen-ticks').innerHTML = Array.from({ length: n }, (_, i) => {
+    const cls = i < listenIdx ? 'tick done' : i === listenIdx ? 'tick cur' : 'tick';
+    return `<div class="${cls} anim" style="animation-delay:${60 + Math.min(i, 24) * 26}ms"></div>`;
+  }).join('');
+
+  document.getElementById('listen-rates').innerHTML = LISTEN_RATES.map(r =>
+    `<button class="seg-btn${r === listenRate ? ' active' : ''}" onclick="listenSetRate('${r}')">${r}</button>`
+  ).join('');
+
+  const both = document.getElementById('listen-both');
+  both.setAttribute('aria-checked', String(listenBoth));
+
+  document.getElementById('listen-queue-head').textContent = 'Queue / ' + total + ' cards';
+  document.getElementById('listen-queue').innerHTML = listenQueue.map((c, i) => `
+    <button class="listen-row${i === listenIdx ? ' now' : ' rise'}"
+            ${i === listenIdx ? '' : `style="animation-delay:${70 + Math.min(i, 14) * 32}ms"`}
+            onclick="listenJump(${i})">
+      <span class="listen-row-idx">${pad2(i + 1)}</span>
+      <span class="listen-row-q">${escapeHtml(c.q)}</span>
+      <span class="listen-row-meta">${i === listenIdx ? 'Now playing' : escapeHtml(c.deck)}</span>
+    </button>`).join('');
+}
+
+function listenStop() {
+  listenPlaying = false;
+  stopSpeech();
+}
+
+/* Plays one face and, when the clip ends, decides what comes next: the answer
+   of the same card if "read the answer too" is on, otherwise the next card.
+   Stops at the end of the queue rather than looping — a loop with no way out
+   is not hands-free, it is a trap. */
+function listenPlayAt(i, face) {
+  if (i < 0 || i >= listenQueue.length) { listenStop(); renderListen(); return; }
+  listenIdx = i;
+  listenFace = face;
+  const card = listenQueue[i];
+  const deck = loadData().decks.find(d => d.id === card.deckId);
+  const ok = speak(face === 'a' ? card.a : card.q, deck && deck.lang);
+  listenPlaying = !!ok;
+  if (ok && currentAudio) {
+    currentAudio.playbackRate = Number(listenRate) || 1;
+    currentAudio.onended = () => {
+      if (!listenPlaying) return;
+      if (face === 'q' && listenBoth) listenPlayAt(i, 'a');
+      else if (i + 1 < listenQueue.length) listenPlayAt(i + 1, 'q');
+      else { listenStop(); renderListen(); }
+    };
+  }
+  renderListen();
+}
+
+function listenToggle() {
+  if (listenPlaying) { listenStop(); renderListen(); }
+  else listenPlayAt(listenIdx, listenFace);
+}
+function listenPrev()  { listenPlayAt(Math.max(0, listenIdx - 1), 'q'); }
+function listenNext()  { listenPlayAt(Math.min(listenQueue.length - 1, listenIdx + 1), 'q'); }
+function listenJump(i) { listenPlayAt(i, 'q'); }
+function listenSetRate(r) {
+  listenRate = r;
+  if (currentAudio) currentAudio.playbackRate = Number(r) || 1;
+  renderListen();
+}
+function listenToggleBoth() { listenBoth = !listenBoth; renderListen(); }
+
+/* ----------------------------------------------------------------
+   TIMED MODE (v6 design, screen 02 — fourth tab)
+   ----------------------------------------------------------------
+   Twenty seconds a card. The clock only runs while the card is face
+   DOWN — once you have seen the answer, rating it is not a race, and
+   the prototype gates on `!s.flipped` for the same reason. Running
+   out rates the card "Again", which is what a blank recall is.
+
+   Copy is verbatim from Recall v6.html except for one word: the
+   design says "scheduled by FSRS" and this app schedules with SM-2.
+   Diogo's call, 2026-08-30 — a screen that names the wrong algorithm
+   is a lie the design did not intend to tell. ------------------- */
+const REVIEW_MODE_NOTES = {
+  Flip:  'Flip cards and rate recall. Intervals are scheduled by SM-2.',
+  Quiz:  'Pick the right answer from four options. Graded automatically and fed back into the schedule.',
+  Cram:  'Sequential pass through the deck. Ratings are ignored and your spaced repetition data stays untouched.',
+  Timed: 'Twenty seconds per card. Running out counts as Again. Trains retrieval speed, not just accuracy.'
+};
+const TIMED_SECONDS = 20;
+
+let reviewMode = 'Flip';
+let timedLeft = TIMED_SECONDS;
+let timedTicker = null;
+
+function setReviewMode(mode) {
+  reviewMode = mode;
+  timedLeft = TIMED_SECONDS;
+  renderReview();
+}
+
+/* One interval for the whole app, started only while it can do something.
+   Cleared on every stop so navigating away cannot leave a clock running
+   against a card nobody is looking at. */
+function stopTimedTicker() {
+  if (timedTicker) { clearInterval(timedTicker); timedTicker = null; }
+}
+
+function startTimedTicker() {
+  stopTimedTicker();
+  timedTicker = setInterval(() => {
+    const onReview = document.getElementById('screen-review').classList.contains('active');
+    if (reviewMode !== 'Timed' || isFlipped || !onReview) { stopTimedTicker(); return; }
+    if (timedLeft <= 1) { stopTimedTicker(); rate('again'); return; }
+    timedLeft--;
+    paintTimer();
+  }, 1000);
+}
+
+function paintTimer() {
+  const el = document.getElementById('review-timer');
+  if (!el) return;
+  const show = reviewMode === 'Timed' && !isFlipped;
+  el.hidden = !show;
+  if (show) el.textContent = pad2(timedLeft) + 's';
+}
+
+function renderReviewMode() {
+  ['flip', 'quiz', 'cram', 'timed'].forEach(k => {
+    const b = document.getElementById('mode-' + k);
+    if (!b) return;
+    const on = k === reviewMode.toLowerCase();
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  const note = document.getElementById('mode-note');
+  if (note) note.textContent = REVIEW_MODE_NOTES[reviewMode] || '';
 }
 
 function flip() { if (!isFlipped) { isFlipped = true; renderReview(); } }
@@ -3258,6 +3827,7 @@ function rate(rating) {
   if (rating === 'again') reviewQueue.push(card.id);  // see it again this session
   reviewPos++;
   isFlipped = false;
+  timedLeft = TIMED_SECONDS;
   if (reviewPos >= reviewQueue.length) finishReview();
   else renderReview();
 }
@@ -7410,7 +7980,7 @@ function loadSampleDeck() {
    from data we already store: card `srs` for the status buckets, and
    the daily `log` for streaks and the activity calendar. */
 
-const HEATMAP_WEEKS = 16;   // ~4 months of activity in the calendar
+const HEATMAP_WEEKS = 17;   // the design's Calendar names this number: "Activity / 17 weeks"
 
 /* How well a card is known.
    Based on `reps` (correct answers in a row) plus the interval, so a
@@ -7949,7 +8519,7 @@ function hmClass(n) {
 
 /* Just the grid. Extracted (feature #20) because the heatmap moved to the home
    dashboard — one generator, so the two callers cannot drift. */
-function heatmapGridHtml(log) {
+function heatmapCellsHtml(log) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const todayTs = today.getTime();
   // End on the Saturday of this week so every column is a whole week.
@@ -7972,7 +8542,13 @@ function heatmapGridHtml(log) {
     }
     cur.setDate(cur.getDate() + 1);
   }
-  return `<div class="heatmap-wrap"><div class="heatmap">${cells}</div></div>`;
+  return cells;
+}
+
+/* The Today panel keeps its own wrapper; the Calendar strip is itself the grid
+   (grid-auto-flow:column, 14px cells) and takes the bare cells. */
+function heatmapGridHtml(log) {
+  return `<div class="heatmap-wrap"><div class="heatmap">${heatmapCellsHtml(log)}</div></div>`;
 }
 
 /* ----------------------------------------------------------------
@@ -9224,5 +9800,6 @@ function onDeleteAssignment(index) {
   renderAssignments();
 }
 
+renderRail();
 goHome();
 initServiceWorker();
